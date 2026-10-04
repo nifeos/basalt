@@ -96,8 +96,26 @@ jobs:
         working-directory: nife
         run: script/ci-build test
 
-      # What was booted: each architecture's test kernel and its program archive. Kept on red as
-      # well as green, because a red image is the one somebody will want to boot by hand.
+      # What was booted: each architecture's system-test kernel and its program archive. Kept on red
+      # as well as green, because a red image is the one somebody will want to boot by hand (a red
+      # that fails before the images are built keeps nothing, and the upload says so). The kernels
+      # are found by name rather than by a fixed path because where cargo puts a test binary moved
+      # with the nightly (`debug/deps/` before, `debug/build/<package>/<hash>/out/` now), and nife's
+      # nightly moves daily.
+      - name: Gather the images
+        if: always() && steps.pin.outcome == 'success'
+        working-directory: nife
+        run: |
+          mkdir -p "$RUNNER_TEMP/images"
+          for arch in aarch64-unknown-none-softfloat riscv64imac-unknown-none-elf x86_64-unknown-none; do
+            [ -d "target/$arch/debug" ] || continue
+            # Newest first: a restored Rust cache can hold an older build's binary beside this one.
+            newest="$(find "target/$arch/debug" -type f -name 'system_tests-*' ! -name '*.d' \
+                \( -path '*/deps/*' -o -path '*/out/*' \) -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+            [ -z "$newest" ] || cp "$newest" "$RUNNER_TEMP/images/system_tests-$arch"
+          done
+          cp target/initrd*.img "$RUNNER_TEMP/images/" 2>/dev/null || true
+          ls -l "$RUNNER_TEMP/images"
       - name: Keep the images
         if: always() && steps.pin.outcome == 'success'
         uses: actions/upload-artifact@v7
@@ -105,9 +123,4 @@ jobs:
           name: nife-${{ steps.pin.outputs.commit }}-images
           retention-days: 14
           if-no-files-found: warn
-          path: |
-            nife/target/initrd*.img
-            nife/target/aarch64-unknown-none-softfloat/debug/deps/system_tests-*
-            nife/target/riscv64imac-unknown-none-elf/debug/deps/system_tests-*
-            nife/target/x86_64-unknown-none/debug/deps/system_tests-*
-            !nife/target/**/*.d
+          path: ${{ runner.temp }}/images/

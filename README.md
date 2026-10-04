@@ -75,7 +75,11 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   gate reports but does not block, and the bump's pull request is merged by a person.
 - **GitHub suspends scheduled workflows after 60 days with no activity in the repository.** A bump
   pull request nobody merges is not activity.
+- **Until the gate has run on `main`, every pull request builds QEMU from source** (about 4.3
+  minutes of a 15-minute run). A cache saved by a pull request is visible only to that pull request,
+  and a red run saves none.
 - **Only github.com repositories can be pinned**, because the gate checks out with
   `actions/checkout`.
 - **The kept "images" are the test images**, the kernels the system test boots and their program
-  archives, not an installable image.
+  archives, not an installable image. A red that fails before the images are built (a host test, a
+  compile error) keeps nothing.
