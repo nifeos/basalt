@@ -1,0 +1,126 @@
+# gate: build nife at the commit pins.toml names and run that commit's own system test.
+#
+# basalt owns no toolchain and no test of its own. It checks out the pinned commit and runs the one
+# check nife's own CI calls `test` (`script/ci-build test`): the host crates, then each
+# architecture's kernel and its programs built and booted under QEMU, aarch64, riscv64 and x86_64,
+# with the system test suite run in each. Using that entry point, rather than re-listing its steps
+# here, is the point: basalt depends on one command name in nife, and what the command does is
+# whatever the pinned commit says it does.
+#
+# **One job, not a matrix per architecture.** `script/ci-build test` runs all three legs in one
+# process, and a per-architecture matrix would triple the provisioning (toolchain, QEMU, the Rust
+# cache) and the host-crate pass to buy a separate status per architecture. The price is recorded
+# in the README's BUGS: a failing leg can hide the legs after it.
+#
+# Runner: the arm64 pool, the same machine nife's CI runs this check on, so a red here and a green
+# there are about the same host. One job per run and `concurrency` cancelling superseded runs on
+# branches keep the cost at one runner per pin.
+#
+# Names provisional: the file, the workflow and the job.
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  nife:
+    name: nife at its pin (image build and system test, three architectures)
+    runs-on: ubuntu-24.04-arm
+    # nife's own budget for this check is 25 minutes with a warm cache. A cold run here also builds
+    # QEMU from source and the whole tree with no Rust cache, so the ceiling is wider; it is a
+    # runaway guard, not an estimate.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the pin
+        id: pin
+        run: |
+          helpers/pins.py get nife | tee -a "$GITHUB_OUTPUT"
+
+      # nife is public, so the default token reads it; persist-credentials is off because nothing
+      # here pushes to it.
+      - name: Check out nife at the pinned commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.slug }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: nife
+          persist-credentials: false
+
+      - name: Confirm the checkout is the pin
+        working-directory: nife
+        env:
+          PIN: ${{ steps.pin.outputs.commit }}
+        run: |
+          head="$(git rev-parse HEAD)"
+          echo "nife HEAD: $head"
+          [ "$head" = "$PIN" ] || { echo "checked out $head, but pins.toml says $PIN" >&2; exit 1; }
+          echo "## nife at \`$PIN\`" >> "$GITHUB_STEP_SUMMARY"
+          git log -1 --format='%cd (UTC) %s' --date=format-local:'%Y-%m-%d %H:%M' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nife -> target
+
+      # The same QEMU nife pins in .qemu-version, built by the pinned commit's own script and cached
+      # under the same key shape nife uses. Caches do not cross repositories, so basalt's first run
+      # builds it once.
+      - name: Cache QEMU
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/nife-qemu
+          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
+      - name: Build QEMU if the cache missed
+        working-directory: nife
+        run: script/ci-qemu
+      - name: Put it on PATH
+        run: echo "$HOME/.cache/nife-qemu/bin" >> "$GITHUB_PATH"
+
+      - name: Provision the toolchain the pinned commit names
+        working-directory: nife
+        run: script/bootstrap
+
+      - name: Build the images and run the system test (aarch64, riscv64, x86_64)
+        working-directory: nife
+        run: script/ci-build test
+
+      # What was booted: each architecture's system-test kernel and its program archive. Kept on red
+      # as well as green, because a red image is the one somebody will want to boot by hand (a red
+      # that fails before the images are built keeps nothing, and the upload says so). The kernels
+      # are found by name rather than by a fixed path because where cargo puts a test binary moved
+      # with the nightly (`debug/deps/` before, `debug/build/<package>/<hash>/out/` now), and nife's
+      # nightly moves daily.
+      - name: Gather the images
+        if: always() && steps.pin.outcome == 'success'
+        working-directory: nife
+        run: |
+          mkdir -p "$RUNNER_TEMP/images"
+          for arch in aarch64-unknown-none-softfloat riscv64imac-unknown-none-elf x86_64-unknown-none; do
+            [ -d "target/$arch/debug" ] || continue
+            # Newest first: a restored Rust cache can hold an older build's binary beside this one.
+            newest="$(find "target/$arch/debug" -type f -name 'system_tests-*' ! -name '*.d' \
+                \( -path '*/deps/*' -o -path '*/out/*' \) -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+            [ -z "$newest" ] || cp "$newest" "$RUNNER_TEMP/images/system_tests-$arch"
+          done
+          cp target/initrd*.img "$RUNNER_TEMP/images/" 2>/dev/null || true
+          ls -l "$RUNNER_TEMP/images"
+      - name: Keep the images
+        if: always() && steps.pin.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: nife-${{ steps.pin.outputs.commit }}-images
+          retention-days: 14
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/images/

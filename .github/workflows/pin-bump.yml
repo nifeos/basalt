@@ -1,0 +1,154 @@
+# pin bump: propose moving each pin in pins.toml to its component's newest main commit.
+#
+# A proposal, not a push. The bump lands as a pull request on the branch `pin/nife`, force-pushed on
+# each run so there is only ever one open, and the gate runs on it like on any other pull request. A
+# person (or, later, a merge queue) merges it. That keeps every pin change reviewable and revertible
+# as one commit, and it means a nife commit that breaks basalt's gate is a red pull request rather
+# than a red main.
+#
+# **Which identity, and why it matters.** GitHub does not start workflows for a push or a pull
+# request made with the job's own `github.token`. So when the run has only that token, it starts the
+# gate itself with `gh workflow run`, which is the one event that token is allowed to trigger, and
+# the gate's checks land on the bump commit and show on the pull request. When the repository has
+# the automation App's secrets (`AUTOMATION_APP_ID`, `AUTOMATION_APP_KEY`) the run uses an
+# installation token instead and the pull request triggers the gate on its own.
+#
+# **Opening the pull request needs a repository setting.** With `github.token`, `gh pr create` is
+# refused unless Settings > Actions > General > "Allow GitHub Actions to create and approve pull
+# requests" is on. The branch is pushed and the gate started before that step, so the evidence
+# exists either way; the run then fails and says which setting it needed.
+#
+# On a pull request that touches this file or helpers/pins.py, the job runs as a dry run: it reads
+# nife's main, rewrites the pin in its own checkout and prints the diff, and pushes nothing. That is
+# this workflow's own test.
+#
+# Names provisional: the file, the workflow, the job and the branch `pin/nife`.
+name: pin bump
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "nife commit to propose instead of main's head (full 40-character id)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - .github/workflows/pin-bump.yml
+      - helpers/pins.py
+
+concurrency:
+  group: pin-bump-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  propose:
+    name: propose a nife pin bump
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      DRY_RUN: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Mint an installation token for the automation App
+        id: app-token
+        if: env.AUTOMATION_APP_ID != '' && env.DRY_RUN != 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Work out whether there is anything to propose
+        id: plan
+        env:
+          INPUT_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -e
+          eval "$(helpers/pins.py get nife | sed 's/^/pin_/')"
+          if [ -n "$INPUT_COMMIT" ]; then
+            target="$INPUT_COMMIT"
+          else
+            target="$(git ls-remote "$pin_repository" refs/heads/main | cut -f1)"
+          fi
+          [ -n "$target" ] || { echo "could not read main's head from $pin_repository" >&2; exit 1; }
+          echo "current=$pin_commit" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "repository=$pin_repository" >> "$GITHUB_OUTPUT"
+          if [ "$pin_commit" = "$target" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "nife is already pinned at $target; nothing to propose."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Proposing nife $pin_commit -> $target"
+          fi
+
+      - name: Rewrite the pin
+        if: steps.plan.outputs.skip == 'false'
+        env:
+          TARGET: ${{ steps.plan.outputs.target }}
+        run: |
+          helpers/pins.py set nife "$TARGET"
+          helpers/pins.py get nife
+          git diff
+
+      - name: Push the branch, start the gate, open or update the pull request
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          CURRENT: ${{ steps.plan.outputs.current }}
+          TARGET: ${{ steps.plan.outputs.target }}
+          REPOSITORY: ${{ steps.plan.outputs.repository }}
+        run: |
+          set -e
+          branch="pin/nife"
+          short_current="$(printf %.9s "$CURRENT")"
+          short_target="$(printf %.9s "$TARGET")"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add pins.toml
+          git commit -m "pin nife at $short_target
+
+          Moves the nife pin from $CURRENT
+          to $TARGET, proposed by the scheduled pin bump.
+          What changed in nife: $REPOSITORY/compare/$CURRENT...$TARGET"
+          git push --force origin "$branch"
+
+          if [ -z "$APP_TOKEN" ]; then
+            gh workflow run gate.yml --ref "$branch"
+            echo "Started the gate on $branch (a github.token push starts no workflow by itself)."
+          fi
+
+          title="pin nife at $short_target"
+          body="**Lane:** $branch, opened by the scheduled pin-bump workflow.
+
+          Moves nife from \`$short_current\` to \`$short_target\`: [what changed]($REPOSITORY/compare/$CURRENT...$TARGET).
+
+          The gate check on this pull request is nife's own image build and system test, run at the new
+          pin on aarch64, riscv64 and x86_64. Green means the pin is safe to take. Red means nife's main
+          moved to a commit that fails its own system test here; do not merge, and look at the gate's log.
+
+          This branch is force-pushed on every scheduled run, so it always proposes main's newest head."
+
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[].number')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "Updated pull request #$existing in place."
+          elif ! gh pr create --head "$branch" --base main --title "$title" --body "$body"; then
+            echo "::error::Could not open the pull request. With github.token this needs Settings >" \
+                 "Actions > General > 'Allow GitHub Actions to create and approve pull requests'." \
+                 "The branch $branch is pushed and the gate is running on it."
+            exit 1
+          fi
