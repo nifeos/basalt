@@ -66,11 +66,10 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   status separately at roughly three times the provisioning cost per run.
 - **The system test runs a second time for every pin.** nife's merge queue already ran it on the
   same commit. That is the price of the gate existing here before a split needs it here.
-- **Opening the bump's pull request needs a setting or an App.** With only `github.token`, GitHub
-  refuses `gh pr create` unless "Allow GitHub Actions to create and approve pull requests" is on,
-  and a pull request made with that token starts no workflow. The bump works around the second by
-  starting the gate itself; the first needs the setting, or the automation App installed here with
-  its two secrets.
+- **The bump depends on the automation App.** It mints an installation token from the secrets
+  `AUTOMATION_APP_ID` and `AUTOMATION_APP_KEY`. Without them it falls back to `github.token`, which
+  starts no workflow (the bump then starts the gate itself) and cannot open a pull request unless
+  "Allow GitHub Actions to create and approve pull requests" is on.
 - **Nothing protects `main` yet.** There is no ruleset, no required check and no merge queue, so the
   gate reports but does not block, and the bump's pull request is merged by a person.
 - **GitHub suspends scheduled workflows after 60 days with no activity in the repository.** A bump
