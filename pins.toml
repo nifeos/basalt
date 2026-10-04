@@ -1,0 +1,13 @@
+# What basalt builds: each component, pinned by repository and commit.
+#
+# One table per component. `repository` is where the source lives and `commit` is the full
+# 40-character commit basalt builds; a branch or tag name is refused, because a pin that moves on its
+# own is not a pin. The gate workflow builds each component at this commit with that commit's own
+# toolchain and runs that commit's own system test. The pin-bump workflow proposes a new commit as a
+# pull request.
+#
+# The file name, the format and the key names are provisional.
+
+[nife]
+repository = "https://github.com/nifeos/nife"
+commit = "e2ee497174609a23288898a355c933d639dda53c"
