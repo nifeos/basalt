@@ -33,4 +33,4 @@ version = "0.4.23"
 sha256 = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
 # A path in this repository, and the SHA-256 of the file there.
 file = "patches/ripgrep-ignore-walk.patch"
-file_sha256 = "21cb673fc404fb3b7c5ea2795f3ae24b67ff4e1d568d4366b2398fba94e32a00"
+file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
