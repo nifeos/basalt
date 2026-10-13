@@ -1,0 +1,36 @@
+# ripgrep, as a basalt package: the first program basalt builds and publishes (nife milestone 810,
+# `ripgrep` is packaged in basalt and installed with `jig`). Optional, never in a base image: a
+# customer gets it with `jig install ripgrep`, and runs it as `rg`.
+#
+# What is pinned, and how each pin is checked by helpers/packages.py before anything is built:
+#
+# - The source: the crate as crates.io serves it, refused unless its SHA-256 is `sha256` below. That
+#   value is the `cksum` crates.io's index carries for the version (https://index.crates.io/ri/pg/ripgrep).
+# - Its one patched dependency: `ignore` at its own version and SHA-256, with nife's patch for its
+#   parallel walker applied. nife maintains the patch (its own header says why), so it is read from
+#   the pinned nife commit and refused unless its SHA-256 is the one below; a bump of nife that
+#   changes the patch fails here until this recipe is reviewed.
+# - The toolchain, the target specs, the standard library and the manifest note all come from the
+#   nife commit pins.toml names, as the gate's build does.
+#
+# The package digest is not recorded here yet: that needs the build to be reproducible across
+# machines, which nobody has measured. The index carries the digest of what this build produced.
+#
+# Every key and the file's layout are provisional.
+
+name = "ripgrep"
+version = "14.1.1"
+# The upstream source.
+crate = "ripgrep"
+sha256 = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9"
+# The program, as the package carries it: the member `bin/rg`, so `jig install ripgrep` installs the
+# program `rg` (nife's `package_archive::PROGRAM_PREFIX`).
+program = "rg"
+
+[[patch]]
+crate = "ignore"
+version = "0.4.23"
+sha256 = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+# A path in the pinned nife commit, and the SHA-256 of the file there.
+file = "helpers/ripgrep-ignore-walk.patch"
+file_sha256 = "21cb673fc404fb3b7c5ea2795f3ae24b67ff4e1d568d4366b2398fba94e32a00"
