@@ -3,6 +3,7 @@
 
 Usage:
     helpers/packages.py build <nife-checkout> <repository-dir> [--triples T ...]
+    helpers/packages.py publish <repository-dir> <site-dir> --release <url>
 
 For each recipe under recipes/, this fetches the pinned source, refuses it unless its SHA-256 is
 the recipe's, builds the program for each nife target with that checkout's own toolchain, standard
@@ -15,6 +16,22 @@ milestone 801 (packages over the internet), calef's Q4 on nife#1884):
 
 The index is nife's stand-in encoding until its TUF client exists (nife milestone 858). The channel
 name `rolling` is provisional, as nife's `package_index::PROVISIONAL_CHANNEL` is.
+
+`publish` turns a built repository into what is served (calef, 2026-10-12 UTC: "Packages on
+Releases, index on Pages"). It writes <site-dir>, the GitHub Pages site behind basalt.nifeos.org,
+with the index's every line given one listed location, the package's asset on the GitHub Release
+whose download URL prefix is --release:
+
+    <site-dir>/rolling/metadata/stand-in-index   `<stem> sha256:<hex> sectigo-root-e46=<release>/<stem>.nifepkg`
+    <site-dir>/rolling/targets/<stem>.nifepkg     basalt's own copy, which nife's jig tries last
+
+The listed location names the root its certificate chains to, `sectigo-root-e46`, which is
+github.com's: calef's C2, ruled 2026-10-12 UTC on nife#2048 (nife section 250, clauses 11 to 13).
+jig fetches it under that root and follows its one redirect to an ISRG Root X1 host.
+
+The copy under targets/ is nife's section 250, clause 9 (2026-10-10 amendment): "basalt always
+keeps a copy under its own targets/, which is tried last". It is the fallback when the Release
+cannot be reached; calef has not ruled on dropping it.
 
 Only ripgrep's recipe shape is understood today (a crate, one patched dependency, one program).
 That is all basalt builds; a second shape is added with the second recipe that needs it.
@@ -182,6 +199,54 @@ def build(nife, repository, triples):
     print("".join(lines), end="")
 
 
+# nife's package_index::Location, which jig applies to every listed location: an optional root
+# name, then https, a host, a path of printable ASCII up to PATH_MAX (256) bytes. A line jig cannot
+# read refuses the whole index, so the same rule is checked here, before anything is published.
+PATH_MAX = 256
+# The root github.com chains to, by the name nife's images carry it under (`location-root` in
+# nife's package_index::BASALT_SOURCES). A Release download starts there.
+RELEASE_ROOT = "sectigo-root-e46"
+
+
+def listed_location(release, stem):
+    url = f"{release.rstrip('/')}/{stem}.nifepkg"
+    if not url.startswith("https://"):
+        fail(f"--release must be an https:// URL; nife's jig refuses anything else ({url})")
+    path = "/" + url[len("https://"):].partition("/")[2]
+    if len(path) > PATH_MAX or not all(0x21 <= ord(c) <= 0x7E for c in path) or "#" in path:
+        fail(f"{url}: its path is not one nife's jig reads (printable ASCII, at most {PATH_MAX} bytes)")
+    return f"{RELEASE_ROOT}={url}"
+
+
+def publish(repository, site, release):
+    index = repository / CHANNEL / "metadata" / "stand-in-index"
+    targets = repository / CHANNEL / "targets"
+    if not index.is_file():
+        fail(f"{index} does not exist; run `build` first")
+    out_metadata = site / CHANNEL / "metadata"
+    out_targets = site / CHANNEL / "targets"
+    out_metadata.mkdir(parents=True, exist_ok=True)
+    out_targets.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for line in index.read_text().splitlines():
+        if not line:
+            continue
+        words = line.split(" ")
+        if len(words) != 2 or not words[1].startswith("sha256:"):
+            fail(f"{index}: {line!r} is not `<stem> sha256:<hex>`; was it published already?")
+        stem, digest = words
+        package = targets / f"{stem}.nifepkg"
+        if not package.is_file() or f"sha256:{sha256(package)}" != digest:
+            fail(f"{package} is missing or does not hash to the index's {digest}")
+        shutil.copyfile(package, out_targets / package.name)
+        lines.append(f"{stem} {digest} {listed_location(release, stem)}\n")
+    if not lines:
+        fail(f"{index} lists no packages; nothing to publish")
+    (out_metadata / "stand-in-index").write_text("".join(lines))
+    print(f"packages: {len(lines)} packages published into {site}")
+    print("".join(lines), end="")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -189,8 +254,15 @@ def main():
     b.add_argument("nife", type=pathlib.Path)
     b.add_argument("repository", type=pathlib.Path)
     b.add_argument("--triples", nargs="+", default=TRIPLES)
+    p = sub.add_parser("publish")
+    p.add_argument("repository", type=pathlib.Path)
+    p.add_argument("site", type=pathlib.Path)
+    p.add_argument("--release", required=True, help="the Release's download URL prefix")
     args = parser.parse_args()
-    build(args.nife, args.repository.resolve(), args.triples)
+    if args.verb == "build":
+        build(args.nife, args.repository.resolve(), args.triples)
+    else:
+        publish(args.repository.resolve(), args.site.resolve(), args.release)
 
 
 if __name__ == "__main__":

@@ -13,9 +13,14 @@
 # prompt on each architecture. The legs run where nife's own CI runs them: aarch64 and riscv64 on
 # the arm64 pool, x86_64 on an x86_64 runner under KVM.
 #
-# Nothing is published to `basalt.nifeos.org` yet: that host does not exist (see the README's BUGS).
+# A third job, `publish`, runs on `main` only, after both: it puts the packages on a GitHub Release
+# and the index on GitHub Pages, the project site of this repository at its own custom domain,
+# `basalt.nifeos.org` (calef, 2026-10-12 UTC: "Packages on Releases, index on Pages"). Each index
+# line lists the package's Release asset, whose download count is the first adoption signal (nife
+# milestone 576). It refuses to run until Pages is enabled with that domain, which is calef's act
+# (the README's "What calef must do").
 #
-# Names provisional: the file, the workflow, the jobs and the artifact.
+# Names provisional: the file, the workflow, the jobs, the artifact and the Release tag scheme.
 name: packages
 
 on:
@@ -131,3 +136,93 @@ jobs:
       - name: Boot nife and install from it
         working-directory: nife
         run: NIFE_BASALT_REPOSITORY="$GITHUB_WORKSPACE/repository" script/ci-build ${{ matrix.row }}
+
+  publish:
+    name: publish the index to Pages and the packages to a Release
+    needs: [build, install]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write  # the Release and its tag
+      pages: write     # the deployment
+      id-token: write  # which deploy-pages needs to prove the deployment came from this run
+    environment:
+      name: github-pages
+      url: https://basalt.nifeos.org/rolling/metadata/stand-in-index
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOMAIN: basalt.nifeos.org
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # Before anything is created: the index must land at the name every image carries. Without a
+      # custom domain a project site is served under the organization's Pages host, and once the
+      # organization's own site (nifeos/nifeos.github.io) takes www.nifeos.org that would put this
+      # index at www.nifeos.org/basalt, a name no image carries.
+      - name: Pages must be on, from Actions, at basalt.nifeos.org
+        run: |
+          if ! site="$(gh api "repos/$GITHUB_REPOSITORY/pages" 2>/dev/null)"; then
+            echo "::error::GitHub Pages is not enabled for $GITHUB_REPOSITORY; see the README's \"What calef must do\""
+            exit 1
+          fi
+          echo "$site" | jq '{build_type, cname, https_enforced, html_url}'
+          [ "$(echo "$site" | jq -r .build_type)" = workflow ] || { echo "::error::Pages must deploy from GitHub Actions"; exit 1; }
+          [ "$(echo "$site" | jq -r .cname)" = "$DOMAIN" ] || { echo "::error::Pages' custom domain must be $DOMAIN"; exit 1; }
+          [ "$(echo "$site" | jq -r .https_enforced)" = true ] || echo "::warning::HTTPS is not enforced on $DOMAIN yet"
+
+      - name: Fetch the repository the build made and the install proved
+        uses: actions/download-artifact@v7
+        with:
+          name: repository
+          path: repository
+
+      # One Release per publish, named for the channel, the commit's UTC date and the commit, so a
+      # rerun of the same commit names the same Release. Provisional.
+      - name: Name the Release
+        id: tag
+        run: |
+          day="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%d)"
+          tag="rolling-$day-${GITHUB_SHA::7}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Write the site
+        run: helpers/packages.py publish repository site --release "${{ steps.tag.outputs.release }}"
+
+      # A rerun of failed jobs reuses the build's artifact, so the bytes are the same and the
+      # Release that exists is accepted. Different bytes under an existing tag are refused: an asset
+      # is never replaced, since an index somewhere may already vouch for it.
+      - name: Put the packages on the Release
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            mkdir existing
+            gh release download "$TAG" --dir existing --pattern '*.nifepkg'
+            for f in repository/rolling/targets/*.nifepkg; do
+              cmp -s "$f" "existing/$(basename "$f")" || { echo "::error::$TAG holds a different $(basename "$f")"; exit 1; }
+            done
+            echo "$TAG already holds these packages"
+          else
+            {
+              echo "basalt's rolling channel, built at nife's pin by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+              echo
+              echo "The index at https://$DOMAIN/rolling/metadata/stand-in-index lists these assets and their SHA-256 digests:"
+              echo
+              echo '```'
+              cat site/rolling/metadata/stand-in-index
+              echo '```'
+            } > notes.md
+            gh release create "$TAG" repository/rolling/targets/*.nifepkg \
+              --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+          fi
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5
