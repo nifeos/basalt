@@ -53,10 +53,16 @@ own site from `nifeos/nifeos.github.io`.
 |---|---|---|
 | The index, `rolling/metadata/stand-in-index` | GitHub Pages, the project site of this repository, at its own custom domain `https://basalt.nifeos.org/` | Every nife image names this host and pins its TLS to ISRG Root X1 (nife §250); Pages certificates are Let's Encrypt and chain to X1 |
 | The packages, `<stem>.nifepkg` | One GitHub Release per publish, tagged `rolling-<UTC date of the commit>-<short commit>` (provisional) | Each asset's `download_count` is the first adoption signal, per package, version and architecture (nife milestone 576). Nothing identifies a system |
-| basalt's own copy of the packages, `rolling/targets/` | The same Pages site | nife §250's amendment of 2026-10-10, clause 9: basalt always keeps a copy under its own `targets/`, tried last. It is also the only copy `jig` can fetch today (BUGS) |
+| basalt's own copy of the packages, `rolling/targets/` | The same Pages site | nife §250's amendment of 2026-10-10, clause 9: basalt always keeps a copy under its own `targets/`, tried last. The fallback when the Release cannot be reached, which is not counted |
 
-Each index line names its package's Release asset as a listed location,
-`<stem> sha256:<hex> https://github.com/nifeos/basalt/releases/download/<tag>/<stem>.nifepkg`.
+Each index line names its package's Release asset as a listed location, with the root its
+certificate chains to:
+`<stem> sha256:<hex> sectigo-root-e46=https://github.com/nifeos/basalt/releases/download/<tag>/<stem>.nifepkg`.
+`github.com` chains to Sectigo Public Server Authentication Root E46, not ISRG Root X1. calef ruled
+on 2026-10-12 (UTC), answering *"a"* on nifeos/nife#2048, that the index may name that root for a
+listed location among the roots an image carries, and that `jig` follows exactly one redirect, held
+to ISRG Root X1 and to the public-address rule. That redirect goes to
+`release-assets.githubusercontent.com`, which serves the bytes.
 The digest decides whether the bytes are believed, wherever they came from. A system-level count
 like Debian's popcon or Fedora's countme needs an endpoint whose logs someone reads, and is later
 work.
@@ -116,13 +122,11 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 
 - **Nothing is published until calef's steps above are done.** Until then the repository lives
   only as a workflow artifact, and the check serves it from nife's test index host.
-- **`jig` cannot fetch a Release asset yet, so it installs from the Pages copy and nothing is
-  counted.** A Release download starts at `github.com`, whose certificate chains to USERTrust ECC
-  (Sectigo), and redirects to `release-assets.githubusercontent.com` with a signed URL that lasts
-  about an hour. `jig` pins ISRG Root X1 for every host and follows no redirect, so it passes over
-  the listed location and falls back to `rolling/targets/` on Pages. Which way to fix that is asked
-  on nifeos/nife#2048. If the answer is to keep only the Release, `publish` stops copying
-  `targets/` (one line in `helpers/packages.py`).
+- **Fetching a Release asset needs a `jig` from nife#2048 or later.** An older `jig` cannot read
+  a location that names its root and refuses the whole index. No image has shipped, so nothing is
+  stranded, but the pin must reach that nife before the first publish.
+- **If GitHub moves `github.com` to a root no image carries, nothing is counted** until an image
+  carries it: `jig` passes over the Release and installs from the Pages copy.
 - **The index copy `jig` keeps is one page per architecture**, 4,095 bytes. With a listed location
   a line is about 200 bytes, so about twenty packages per architecture fit.
 - **A Release is never pruned.** Pages carries only the newest build; old versions stay reachable

@@ -22,12 +22,16 @@ Releases, index on Pages"). It writes <site-dir>, the GitHub Pages site behind b
 with the index's every line given one listed location, the package's asset on the GitHub Release
 whose download URL prefix is --release:
 
-    <site-dir>/rolling/metadata/stand-in-index   `<stem> sha256:<hex> <release>/<stem>.nifepkg`
+    <site-dir>/rolling/metadata/stand-in-index   `<stem> sha256:<hex> sectigo-root-e46=<release>/<stem>.nifepkg`
     <site-dir>/rolling/targets/<stem>.nifepkg     basalt's own copy, which nife's jig tries last
 
+The listed location names the root its certificate chains to, `sectigo-root-e46`, which is
+github.com's: calef's C2, ruled 2026-10-12 UTC on nife#2048 (nife section 250, clauses 11 to 13).
+jig fetches it under that root and follows its one redirect to an ISRG Root X1 host.
+
 The copy under targets/ is nife's section 250, clause 9 (2026-10-10 amendment): "basalt always
-keeps a copy under its own targets/, which is tried last". Whether it stays, now that the packages
-are on Releases, rides on the question on nife#2048 (see the README's BUGS).
+keeps a copy under its own targets/, which is tried last". It is the fallback when the Release
+cannot be reached; calef has not ruled on dropping it.
 
 Only ripgrep's recipe shape is understood today (a crate, one patched dependency, one program).
 That is all basalt builds; a second shape is added with the second recipe that needs it.
@@ -195,10 +199,13 @@ def build(nife, repository, triples):
     print("".join(lines), end="")
 
 
-# nife's package_index::Location, which jig applies to every listed location: https, a host, a
-# path of printable ASCII up to PATH_MAX (256) bytes. A line jig cannot read refuses the whole index,
-# so the same rule is checked here, before anything is published.
+# nife's package_index::Location, which jig applies to every listed location: an optional root
+# name, then https, a host, a path of printable ASCII up to PATH_MAX (256) bytes. A line jig cannot
+# read refuses the whole index, so the same rule is checked here, before anything is published.
 PATH_MAX = 256
+# The root github.com chains to, by the name nife's images carry it under (`location-root` in
+# nife's package_index::BASALT_SOURCES). A Release download starts there.
+RELEASE_ROOT = "sectigo-root-e46"
 
 
 def listed_location(release, stem):
@@ -208,7 +215,7 @@ def listed_location(release, stem):
     path = "/" + url[len("https://"):].partition("/")[2]
     if len(path) > PATH_MAX or not all(0x21 <= ord(c) <= 0x7E for c in path) or "#" in path:
         fail(f"{url}: its path is not one nife's jig reads (printable ASCII, at most {PATH_MAX} bytes)")
-    return url
+    return f"{RELEASE_ROOT}={url}"
 
 
 def publish(repository, site, release):
