@@ -98,18 +98,18 @@ def build_ripgrep_shape(recipe, nife, work, triples):
     config = []
     for patch in recipe.get("patch", []):
         dep = work / f"{patch['crate']}-{patch['version']}"
-        patch_file = nife / patch["file"]
+        patch_file = BASALT / patch["file"]
         if sha256(patch_file) != patch["file_sha256"]:
             fail(
-                f"nife's {patch['file']} has SHA-256 {sha256(patch_file)}, not the recipe's "
-                f"{patch['file_sha256']}: the pinned nife changed the patch; review it and the recipe"
+                f"{patch['file']} has SHA-256 {sha256(patch_file)}, not the recipe's "
+                f"{patch['file_sha256']}: the patch changed; review it and the recipe together"
             )
         shutil.rmtree(dep, ignore_errors=True)
         unpack(fetch_crate(patch["crate"], patch["version"], patch["sha256"], work), work)
         run(["patch", "-p1", "-s", "-i", patch_file], cwd=dep)
         config += ["--config", f'patch.crates-io.{patch["crate"]}.path="{dep}"']
         # The lock file names the registry copy; a patched path dependency carries no source or
-        # checksum, so those two lines go from its entry, as nife's helpers/build-ripgrep.sh does.
+        # checksum, so those two lines go from its entry and nothing else in the lock moves.
         lock = src / "Cargo.lock"
         kept, inside = [], False
         for line in lock.read_text().splitlines():

@@ -30,6 +30,9 @@ does not know basalt exists.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Today that is
   [`ripgrep`](recipes/ripgrep.toml): the crate and its one patched dependency, each pinned by
   SHA-256, and the program it installs as (`rg`).
+- [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
+  recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
+  walker on nife.
 - [`helpers/packages.py`](helpers/packages.py) builds every recipe against a nife checkout, with
   that checkout's toolchain, standard library, manifest note and `cargo xtask package`, and writes
   a repository in the layout nife's `jig` reads: `rolling/metadata/stand-in-index` and
