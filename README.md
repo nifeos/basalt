@@ -32,14 +32,15 @@ does not know basalt exists.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
-  either (`helpers/packages.py check`). Today there are five.
+  either (`helpers/packages.py check`). Today there are six.
   [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
   SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) and
   [`hackbench`](recipes/hackbench.toml) each name one C file pinned by SHA-256 and the flags it is
   compiled with against the pinned nife's C library. [`sqlite`](recipes/sqlite.toml) names
   SQLite's amalgamation zip, unpacked after its digest is checked, and `speedtest1.c` beside it.
   [`rmle`](recipes/rmle.toml) is the first first-party package: a `[[bin]]` of the pinned nife's
-  own workspace, built at that commit, with nothing fetched.
+  own workspace, built at that commit, with nothing fetched. [`demos`](recipes/demos.toml) is
+  the second, carrying `least_authority_demo`.
 - [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
   recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
   walker on nife.
