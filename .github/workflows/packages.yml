@@ -13,12 +13,12 @@
 # prompt on each architecture. The legs run where nife's own CI runs them: aarch64 and riscv64 on
 # the arm64 pool, x86_64 on an x86_64 runner under KVM.
 #
-# A third job, `publish`, runs on `main` only, after both: it puts the packages on a GitHub Release
-# and the index on GitHub Pages, the project site of this repository at its own custom domain,
-# `basalt.nifeos.org` (calef, 2026-10-12 UTC: "Packages on Releases, index on Pages"). Each index
-# line lists the package's Release asset, whose download count is the first adoption signal (nife
-# milestone 576). It refuses to run until Pages is enabled with that domain, which is calef's act
-# (the README's "What calef must do").
+# A third job, `publish`, runs on `main` only, after both: it puts the packages and their source
+# archives on a GitHub Release and the index on GitHub Pages, the project site of this repository at
+# its own custom domain, `basalt.nifeos.org` (calef, 2026-10-12 UTC: "Packages on Releases, index on
+# Pages"). Each index line lists the package's Release asset, whose download count is the first
+# adoption signal (nife milestone 576). It refuses to run until Pages is enabled with that domain,
+# which is calef's act (the README's "What calef must do").
 #
 # Names provisional: the file, the workflow, the jobs, the artifact and the Release tag scheme.
 name: packages
@@ -202,18 +202,31 @@ jobs:
 
       # A rerun of failed jobs reuses the build's artifact, so the bytes are the same and the
       # Release that exists is accepted. Different bytes under an existing tag are refused: an asset
-      # is never replaced, since an index somewhere may already vouch for it.
-      - name: Put the packages on the Release
+      # is never replaced, since an index somewhere may already vouch for it. A source archive the
+      # Release lacks is added to it.
+      #
+      # Each package goes up with its source archive (`<name>-<version>-source.tar.gz`, provisional),
+      # what helpers/packages.py says it was built from: a GPL package's binary may only be offered
+      # with its source, and every package is treated the same.
+      - name: Put the packages and their sources on the Release
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
+          shopt -s nullglob
+          sources=(repository/rolling/sources/*-source.tar.gz)
+          [ ${#sources[@]} -gt 0 ] || { echo "::error::the build wrote no source archives"; exit 1; }
           if gh release view "$TAG" >/dev/null 2>&1; then
             mkdir existing
-            gh release download "$TAG" --dir existing --pattern '*.nifepkg'
-            for f in repository/rolling/targets/*.nifepkg; do
-              cmp -s "$f" "existing/$(basename "$f")" || { echo "::error::$TAG holds a different $(basename "$f")"; exit 1; }
+            gh release download "$TAG" --dir existing --pattern '*.nifepkg' --pattern '*-source.tar.gz'
+            for f in repository/rolling/targets/*.nifepkg "${sources[@]}"; do
+              e="existing/$(basename "$f")"
+              if [ ! -e "$e" ] && [[ "$f" == *-source.tar.gz ]]; then
+                gh release upload "$TAG" "$f"
+                continue
+              fi
+              cmp -s "$f" "$e" || { echo "::error::$TAG holds a different $(basename "$f")"; exit 1; }
             done
-            echo "$TAG already holds these packages"
+            echo "$TAG holds these packages and their sources"
           else
             {
               echo "basalt's rolling channel, built at nife's pin by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
@@ -223,8 +236,10 @@ jobs:
               echo '```'
               cat site/rolling/metadata/stand-in-index
               echo '```'
+              echo
+              echo "Each package's source, the exact files and patches it was built from, is the \`<name>-<version>-source.tar.gz\` beside it."
             } > notes.md
-            gh release create "$TAG" repository/rolling/targets/*.nifepkg \
+            gh release create "$TAG" repository/rolling/targets/*.nifepkg "${sources[@]}" \
               --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
           fi
 

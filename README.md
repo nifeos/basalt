@@ -39,13 +39,19 @@ does not know basalt exists.
   also takes that checkout's compiler, C library flags and link script
   (`helpers/c-library-cc.sh`, `helpers/c-library-cflags.sh`, `helpers/build-c-program.sh`). It writes
   a repository in the layout nife's `jig` reads: `rolling/metadata/stand-in-index` and
-  `rolling/targets/<stem>.nifepkg`.
+  `rolling/targets/<stem>.nifepkg`. Beside them it writes each package's source archive,
+  `rolling/sources/<name>-<version>-source.tar.gz` (provisional): the exact upstream files the
+  recipe fetched, the patches it applied, the recipe, the build script, `pins.toml` and a note
+  naming the nife commit it was built and linked with.
 - [`packages`](.github/workflows/packages.yml) runs that build at the pin, keeps the repository as
   the run's artifact, and boots the pinned nife's interactive check with the repository named in
   `NIFE_BASALT_REPOSITORY`, so `jig update`, `jig install ripgrep` and `rg --version` are typed at
   the prompt on aarch64, riscv64 and x86_64 (nife milestone 810).
 - Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
-  index on GitHub Pages at `basalt.nifeos.org`, as the next section says.
+  index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
+  published with its source archive beside it, on the Release and on Pages. ioping is
+  GPL-3.0-or-later, so its binaries may only be offered that way; every package gets the same
+  treatment so no recipe has to remember.
 
 ## Where basalt is served
 

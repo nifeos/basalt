@@ -13,6 +13,17 @@ milestone 801 (packages over the internet), calef's Q4 on nife#1884):
 
     <repository-dir>/rolling/metadata/stand-in-index   one `<stem> sha256:<hex>` line per package
     <repository-dir>/rolling/targets/<stem>.nifepkg     the packages
+    <repository-dir>/rolling/sources/<name>-<version>-source.tar.gz
+                                                        what each package was built from
+
+The source archive is the package's corresponding source, published beside every copy of the
+package: the exact upstream files the recipe fetched (each checked against its SHA-256), the patches
+it applied, the recipe itself, this script and pins.toml, and a `BUILT-FROM` note naming the nife
+commit whose toolchain, standard library and C library the package was built and linked with. It is
+written byte-for-byte reproducibly (sorted members, fixed times and owners), so a rerun of the same
+commit makes the same archive. ioping is GPL-3.0-or-later, so its binaries may only be offered with
+this; every package gets one so no recipe has to remember. The archive's name and layout are
+provisional.
 
 The index is nife's stand-in encoding until its TUF client exists (nife milestone 858). The channel
 name `rolling` is provisional, as nife's `package_index::PROVISIONAL_CHANNEL` is.
@@ -24,6 +35,7 @@ whose download URL prefix is --release:
 
     <site-dir>/rolling/metadata/stand-in-index   `<stem> sha256:<hex> sectigo-root-e46=<release>/<stem>.nifepkg`
     <site-dir>/rolling/targets/<stem>.nifepkg     basalt's own copy, which nife's jig tries last
+    <site-dir>/rolling/sources/<name>-<version>-source.tar.gz   the source of that copy
 
 The listed location names the root its certificate chains to, `sectigo-root-e46`, which is
 github.com's: calef's C2, ruled 2026-10-12 UTC on nife#2048 (nife section 250, clauses 11 to 13).
@@ -41,7 +53,9 @@ Name and interface provisional.
 """
 
 import argparse
+import gzip
 import hashlib
+import io
 import os
 import pathlib
 import shutil
@@ -96,9 +110,13 @@ def run(cmd, cwd, env=None):
 
 
 def build_ripgrep_shape(recipe, nife, work, triples):
-    """The crate, its one patched dependency, built for each triple. Returns {triple: elf path}."""
+    """The crate, its one patched dependency, built for each triple.
+
+    Returns ({triple: elf path}, [each fetched source file])."""
     name, version = recipe["crate"], recipe["version"]
-    unpack(fetch_crate(name, version, recipe["sha256"], work), work)
+    crate_file = fetch_crate(name, version, recipe["sha256"], work)
+    sources = [crate_file]
+    unpack(crate_file, work)
     src = work / f"{name}-{version}"
     config = []
     for patch in recipe.get("patch", []):
@@ -110,7 +128,9 @@ def build_ripgrep_shape(recipe, nife, work, triples):
                 f"{patch['file_sha256']}: the patch changed; review it and the recipe together"
             )
         shutil.rmtree(dep, ignore_errors=True)
-        unpack(fetch_crate(patch["crate"], patch["version"], patch["sha256"], work), work)
+        dep_file = fetch_crate(patch["crate"], patch["version"], patch["sha256"], work)
+        sources.append(dep_file)
+        unpack(dep_file, work)
         run(["patch", "-p1", "-s", "-i", patch_file], cwd=dep)
         config += ["--config", f'patch.crates-io.{patch["crate"]}.path="{dep}"']
         # The lock file names the registry copy; a patched path dependency carries no source or
@@ -165,12 +185,12 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         elf = dest / recipe["program"]
         shutil.copyfile(src / "target" / triple / "release" / recipe["program"], elf)
         out[triple] = elf
-    return out
+    return out, sources
 
 
 def build_c_shape(recipe, nife, work, triples):
     """C sources compiled against the pinned nife's C library, one object per `[[object]]`, and
-    linked by that nife's `helpers/build-c-program.sh`. Returns {triple: elf path}.
+    linked by that nife's `helpers/build-c-program.sh`. Returns ({triple: elf path}, [source]).
 
     Everything that makes a C program a nife program is the pinned commit's, so nothing here can
     drift from it: the compiler (`helpers/c-library-cc.sh`), the target and library flags and
@@ -179,8 +199,10 @@ def build_c_shape(recipe, nife, work, triples):
     foreign-note`). The recipe adds only its own sources and flags."""
     src = work / recipe["name"]
     src.mkdir(parents=True, exist_ok=True)
-    for source in recipe["source"]:
+    sources = [
         fetch(source["url"], src / source["url"].rsplit("/", 1)[1], source["sha256"])
+        for source in recipe["source"]
+    ]
     cc = subprocess.run(
         [nife / "helpers" / "c-library-cc.sh"], cwd=nife, check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -209,7 +231,7 @@ def build_c_shape(recipe, nife, work, triples):
         # spawnproto::IMAGE_MAX_PAGES). The manifest note is an allocated PT_NOTE, which this keeps.
         run([objcopy, "--strip-all", nife / "target" / program / triple / program, elf], cwd=nife)
         out[triple] = elf
-    return out
+    return out, sources
 
 
 def pack(recipe, nife, triple, elf):
@@ -226,12 +248,54 @@ def pack(recipe, nife, triple, elf):
     return stem, nife / "target" / "packages" / f"{stem}.nifepkg"
 
 
+def source_archive(recipe, recipe_path, sources, nife, dest):
+    """The package's corresponding source as one reproducible .tar.gz at `dest`.
+
+    Members, under `<name>-<version>-source/`: `upstream/` (each fetched file, as fetched),
+    `patches/` (each patch the recipe applies), `recipes/<name>.toml`, `helpers/packages.py`,
+    `pins.toml` and `BUILT-FROM`."""
+    top = f"{recipe['name']}-{recipe['version']}-source"
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=nife, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    pins = tomllib.loads((BASALT / "pins.toml").read_text())
+    note = (
+        f"{recipe['name']} {recipe['version']}, as basalt builds it.\n\n"
+        f"Built and linked with the toolchain, standard library and C library of nife at\n"
+        f"{pins['nife']['repository']} commit {commit}\n"
+        f"(the nife pin in pins.toml is {pins['nife']['commit']}).\n\n"
+        "upstream/ holds the files the recipe fetched, each checked against the SHA-256 the\n"
+        "recipe names; patches/ holds what the recipe applies to them. helpers/packages.py is\n"
+        "the build: `helpers/packages.py build <nife checkout> <repository-dir>`.\n"
+    )
+    members = [(f"upstream/{s.name}", s.read_bytes()) for s in sources]
+    for patch in recipe.get("patch", []):
+        members.append((patch["file"], (BASALT / patch["file"]).read_bytes()))
+    members += [
+        (f"recipes/{recipe_path.name}", recipe_path.read_bytes()),
+        ("helpers/packages.py", (BASALT / "helpers" / "packages.py").read_bytes()),
+        ("pins.toml", (BASALT / "pins.toml").read_bytes()),
+        ("BUILT-FROM", note.encode()),
+    ]
+    tar_bytes = io.BytesIO()
+    with tarfile.open(fileobj=tar_bytes, mode="w", format=tarfile.PAX_FORMAT) as t:
+        for name, data in sorted(members):
+            info = tarfile.TarInfo(f"{top}/{name}")
+            info.size, info.mode, info.mtime = len(data), 0o644, 0
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            t.addfile(info, io.BytesIO(data))
+    with open(dest, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", filename="", mtime=0) as z:
+        z.write(tar_bytes.getvalue())
+
+
 def build(nife, repository, triples):
     nife = nife.resolve()
     targets = repository / CHANNEL / "targets"
     metadata = repository / CHANNEL / "metadata"
-    targets.mkdir(parents=True, exist_ok=True)
-    metadata.mkdir(parents=True, exist_ok=True)
+    source_dir = repository / CHANNEL / "sources"
+    for d in (targets, metadata, source_dir):
+        d.mkdir(parents=True, exist_ok=True)
     lines = []
     # Outside both checkouts: an unpacked crate with no [workspace] table finds the nearest
     # enclosing workspace and refuses to build inside it.
@@ -240,10 +304,14 @@ def build(nife, repository, triples):
     for path in sorted((BASALT / "recipes").glob("*.toml")):
         recipe = tomllib.loads(path.read_text())
         shape = build_c_shape if "object" in recipe else build_ripgrep_shape
-        for triple, elf in shape(recipe, nife, work, triples).items():
+        elfs, sources = shape(recipe, nife, work, triples)
+        for triple, elf in elfs.items():
             stem, package = pack(recipe, nife, triple, elf)
             shutil.copyfile(package, targets / f"{stem}.nifepkg")
             lines.append(f"{stem} sha256:{sha256(package)}\n")
+        archive = source_dir / f"{recipe['name']}-{recipe['version']}-source.tar.gz"
+        source_archive(recipe, path, sources, nife, archive)
+        print(f"packages: {archive.name} sha256:{sha256(archive)}")
     (metadata / "stand-in-index").write_text("".join(lines))
     print(f"packages: {len(lines)} packages in {repository}")
     print("".join(lines), end="")
@@ -275,8 +343,9 @@ def publish(repository, site, release):
         fail(f"{index} does not exist; run `build` first")
     out_metadata = site / CHANNEL / "metadata"
     out_targets = site / CHANNEL / "targets"
-    out_metadata.mkdir(parents=True, exist_ok=True)
-    out_targets.mkdir(parents=True, exist_ok=True)
+    out_sources = site / CHANNEL / "sources"
+    for d in (out_metadata, out_targets, out_sources):
+        d.mkdir(parents=True, exist_ok=True)
     lines = []
     for line in index.read_text().splitlines():
         if not line:
@@ -292,6 +361,13 @@ def publish(repository, site, release):
         lines.append(f"{stem} {digest} {listed_location(release, stem)}\n")
     if not lines:
         fail(f"{index} lists no packages; nothing to publish")
+    # Every package is published beside its source, here as on the Release.
+    for stem in (line.split(" ")[0] for line in lines):
+        name_version = stem.rsplit("-", 1)[0]
+        archive = repository / CHANNEL / "sources" / f"{name_version}-source.tar.gz"
+        if not archive.is_file():
+            fail(f"{stem} has no source archive ({archive}); refusing to publish it without one")
+        shutil.copyfile(archive, out_sources / archive.name)
     (out_metadata / "stand-in-index").write_text("".join(lines))
     print(f"packages: {len(lines)} packages published into {site}")
     print("".join(lines), end="")
