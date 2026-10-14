@@ -32,11 +32,12 @@ does not know basalt exists.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
-  either (`helpers/packages.py check`). Today there are three.
+  either (`helpers/packages.py check`). Today there are four.
   [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
   SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) and
   [`hackbench`](recipes/hackbench.toml) each name one C file pinned by SHA-256 and the flags it is
-  compiled with against the pinned nife's C library.
+  compiled with against the pinned nife's C library. [`sqlite`](recipes/sqlite.toml) names
+  SQLite's amalgamation zip, unpacked after its digest is checked, and `speedtest1.c` beside it.
 - [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
   recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
   walker on nife.
@@ -173,8 +174,8 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   nife's C library linked into every program are MIT OR Apache-2.0 (the C library MIT), and their
   notices are not in the package yet.
 - **`helpers/packages.py` knows two recipe shapes**, a crate with patched dependencies and C
-  files compiled one object each, and either carries exactly one program. An archive to unpack
-  (SQLite's amalgamation is a zip) is not understood yet.
+  files compiled one object each, and either carries exactly one program. The C shape unpacks a
+  zip and nothing else (no tarballs yet).
 
 - **The gate is one job, so a failing architecture can hide the ones after it.** `script/ci-build
   test` runs the three legs in order in one process. A per-architecture matrix would show each leg's
