@@ -6,9 +6,9 @@
 # What is pinned, and how helpers/packages.py checks each pin before anything is built:
 #
 # - The source: ioping 1.3's one C file, `ioping.c` at the `v1.3` tag of its GitHub repository,
-#   refused unless its SHA-256 is `sha256` below. It equals the `ioping.c` in the v1.3 release
-#   tarball (read 2026-10-10 UTC). The source is compiled untouched; ioping takes its generic path
-#   on a platform that is neither Linux nor a BSD.
+#   refused unless its SHA-256 is `sha256` below, and its `LICENSE` from the same tag. `ioping.c`
+#   equals the one in the v1.3 release tarball (read 2026-10-10 UTC). The source is compiled
+#   untouched; ioping takes its generic path on a platform that is neither Linux nor a BSD.
 # - The compiler, the C library's flags and headers, the link, the standard library and the
 #   manifest note all come from the nife commit pins.toml names: its `helpers/c-library-cc.sh`,
 #   `helpers/c-library-cflags.sh` and `helpers/build-c-program.sh`, as nife's own helper used them.
@@ -24,10 +24,20 @@
 name = "ioping"
 version = "1.3"
 program = "ioping"
+# What upstream licenses it under (SPDX), and the files the package carries as `doc/<file name>`:
+# `LICENSE`, fetched below with the source. `ioping.c`'s own header says "version 3 of the License,
+# or (at your option) any later version".
+license = "GPL-3.0-or-later"
+license_files = ["LICENSE"]
 
 [[source]]
 url = "https://raw.githubusercontent.com/koct9i/ioping/v1.3/ioping.c"
 sha256 = "4336abbf0b71df3e006769b7913879a2fcdb59531a9e773fc5af74c08fb408e0"
+
+# The GPLv3 text, from the same tag. Fetched and checked like the source, never compiled.
+[[source]]
+url = "https://raw.githubusercontent.com/koct9i/ioping/v1.3/LICENSE"
+sha256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
 
 # One object per entry, compiled with the pinned nife's C library flags and then these. `-std=gnu99`
 # and an empty `EXTRA_VERSION` are what ioping's own Makefile passes.

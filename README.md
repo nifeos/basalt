@@ -27,7 +27,9 @@ does not know basalt exists.
   it rewrites the pin on the branch `pin/nife` and opens (or updates) one pull request, and the gate
   runs on it.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
-- [`recipes/`](recipes/) holds one recipe per package basalt builds. Today there are two.
+- [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
+  `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
+  either (`helpers/packages.py check`). Today there are two.
   [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
   SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) names one C file
   pinned by SHA-256 and the flags it is compiled with against the pinned nife's C library.
@@ -52,6 +54,19 @@ does not know basalt exists.
   published with its source archive beside it, on the Release and on Pages. ioping is
   GPL-3.0-or-later, so its binaries may only be offered that way; every package gets the same
   treatment so no recipe has to remember.
+
+## Licenses
+
+basalt's own files are licensed under either [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT),
+at your option. A patch under [`patches/`](patches/) is offered under the license of the upstream
+project it patches.
+
+Each package is under its upstream project's license, which its recipe names. The package
+carries that project's license files as members `doc/<file name>`, and a Rust package also carries
+`doc/THIRD-PARTY-NOTICES`, the license files of every crate it is built from. The `doc/` prefix is
+nife milestone 918's (a package carries its program's documentation); the member names are
+provisional until 918 settles its convention. Every package is published with its source archive
+beside it.
 
 ## Where basalt is served
 
@@ -147,6 +162,9 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 - **A recipe records the source's digest, not the package's.** Recording the package's needs the
   build to be reproducible across machines, which nobody has measured; the index carries the
   digest of what this run built.
+- **A package's notices stop at its upstream project and its crates.** The standard library and
+  nife's C library linked into every program are MIT OR Apache-2.0 (the C library MIT), and their
+  notices are not in the package yet.
 - **`helpers/packages.py` knows two recipe shapes**, a crate with patched dependencies and C
   files compiled one object each, and either carries exactly one program. An archive to unpack
   (SQLite's amalgamation is a zip) is not understood yet.
