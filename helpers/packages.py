@@ -4,6 +4,7 @@
 Usage:
     helpers/packages.py build <nife-checkout> <repository-dir> [--triples T ...]
     helpers/packages.py publish <repository-dir> <site-dir> --release <url>
+    helpers/packages.py check
 
 For each recipe under recipes/, this fetches the pinned source, refuses it unless its SHA-256 is
 the recipe's, builds the program for each nife target with that checkout's own toolchain, standard
@@ -45,6 +46,16 @@ The copy under targets/ is nife's section 250, clause 9 (2026-10-10 amendment): 
 keeps a copy under its own targets/, which is tried last". It is the fallback when the Release
 cannot be reached; calef has not ruled on dropping it.
 
+Every recipe names its `license`, an SPDX expression, and its `license_files`, paths inside the
+unpacked upstream source. `check` refuses a recipe missing either, and `build` runs `check` before
+it fetches anything. Each package carries those files as members `doc/<file name>`, and a crate
+recipe also carries `doc/THIRD-PARTY-NOTICES`: the license files of every crate it is built from,
+each distinct text once with the crates that ship it. The `doc/` prefix is nife milestone 918's
+(a package carries its program's documentation); the license member names and the notices file
+are provisional until 918 lands its member convention.
+
+    helpers/packages.py check
+
 Two recipe shapes are understood, each with one program. A recipe naming a `crate` is a Rust crate
 with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
 compiled against the pinned nife's C library (ioping, nife milestone 906).
@@ -56,8 +67,10 @@ import argparse
 import gzip
 import hashlib
 import io
+import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -74,6 +87,157 @@ CHANNEL = "rolling"
 def fail(message):
     print(f"packages: {message}", file=sys.stderr)
     sys.exit(1)
+
+
+# An SPDX license expression, checked for shape: identifiers (`LicenseRef-` ones included, with an
+# optional `+`), `AND`, `OR`, `WITH` and balanced parentheses. Whether an identifier is on the SPDX
+# list is not checked here; review is.
+SPDX_ID = re.compile(r"(LicenseRef-)?[A-Za-z0-9][A-Za-z0-9.-]*\+?")
+
+
+def spdx_ok(expression):
+    """Whether `expression` parses as `term ((AND|OR) term)*`, where a term is `( expression )` or
+    an identifier with an optional `WITH <exception>`."""
+    tokens = expression.replace("(", " ( ").replace(")", " ) ").split()
+    at = 0
+
+    def identifier():
+        nonlocal at
+        if at < len(tokens) and tokens[at] not in ("AND", "OR", "WITH") and SPDX_ID.fullmatch(tokens[at]):
+            at += 1
+            return True
+        return False
+
+    def term():
+        nonlocal at
+        if at < len(tokens) and tokens[at] == "(":
+            at += 1
+            if not expr() or at >= len(tokens) or tokens[at] != ")":
+                return False
+            at += 1
+            return True
+        if not identifier():
+            return False
+        if at < len(tokens) and tokens[at] == "WITH":
+            at += 1
+            return identifier()
+        return True
+
+    def expr():
+        nonlocal at
+        if not term():
+            return False
+        while at < len(tokens) and tokens[at] in ("AND", "OR"):
+            at += 1
+            if not term():
+                return False
+        return True
+
+    return expr() and at == len(tokens)
+
+
+# A member name is at most nife's package_archive::NAME_LEN bytes.
+NAME_LEN = 32
+LICENSE_PREFIX = "doc/"
+NOTICES = "THIRD-PARTY-NOTICES"
+
+
+def check_recipe(path):
+    """The recipe's problems, as messages; empty when it may be built."""
+    recipe = tomllib.loads(path.read_text())
+    problems = []
+    license = recipe.get("license")
+    if not isinstance(license, str) or not license.strip():
+        problems.append("names no `license` (an SPDX expression)")
+    elif not spdx_ok(license):
+        problems.append(f"`license = {license!r}` is not an SPDX expression")
+    files = recipe.get("license_files")
+    if not isinstance(files, list) or not files or not all(isinstance(f, str) for f in files):
+        problems.append("names no `license_files` (paths inside the upstream source)")
+    else:
+        for f in files:
+            member = LICENSE_PREFIX + pathlib.PurePosixPath(f).name
+            if len(member.encode()) > NAME_LEN:
+                problems.append(f"license file {f!r} makes member {member!r}, over {NAME_LEN} bytes")
+        names = [pathlib.PurePosixPath(f).name for f in files]
+        if len(set(names)) != len(names) or NOTICES in names:
+            problems.append("two license files share a name, or one is named " + NOTICES)
+    return [f"{path.relative_to(BASALT)}: {p}" for p in problems]
+
+
+def check():
+    problems = []
+    for path in sorted((BASALT / "recipes").glob("*.toml")):
+        problems += check_recipe(path)
+    for p in problems:
+        print(f"packages: {p}", file=sys.stderr)
+    if problems:
+        fail(f"{len(problems)} recipe problem(s); see CONTRIBUTING.md")
+    print("packages: every recipe names its license and license files")
+
+
+def license_docs(recipe, src):
+    """[(member name, path)] for the recipe's license files, refused if one is missing."""
+    docs = []
+    for f in recipe["license_files"]:
+        path = src / f
+        if not path.is_file():
+            fail(f"{recipe['name']}: license file {f} is not in the upstream source")
+        docs.append((LICENSE_PREFIX + pathlib.PurePosixPath(f).name, path))
+    return docs
+
+
+LICENSE_NAME = re.compile(r"(LICEN[CS]E|COPYING|UNLICENSE|NOTICE|COPYRIGHT)", re.IGNORECASE)
+
+
+def third_party_notices(recipe, src, config, dest):
+    """Write `dest`: the license files of every crate the recipe's crate depends on, each distinct
+    text once, headed by the crates that ship it.
+
+    The crates are those reached from the root through normal dependencies with no platform
+    condition, or one naming nife. Every condition in ripgrep's graph (unix, windows, msvc, musl
+    and named Windows triples) is false on nife's targets, so those crates are not built. Build-time
+    crates (proc macros) are listed, a superset of what the program contains."""
+    meta = json.loads(
+        subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--locked", *config],
+            cwd=src, check=True, capture_output=True, text=True,
+        ).stdout
+    )
+    packages = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    root = meta["resolve"]["root"]
+    seen, stack = set(), [root]
+    while stack:
+        for dep in nodes[stack.pop()]["deps"]:
+            if dep["pkg"] in seen:
+                continue
+            if any(k["kind"] is None and (k["target"] is None or "nife" in k["target"])
+                   for k in dep["dep_kinds"]):
+                seen.add(dep["pkg"])
+                stack.append(dep["pkg"])
+    texts = {}
+    for pid in seen:
+        package = packages[pid]
+        crate = f"{package['name']} {package['version']} ({package.get('license') or 'no license field'})"
+        directory = pathlib.Path(package["manifest_path"]).parent
+        found = sorted(f for f in directory.iterdir() if f.is_file() and LICENSE_NAME.match(f.name))
+        if not found:
+            texts.setdefault(b"(no license file shipped in the crate)", []).append(crate)
+        for f in found:
+            texts.setdefault(f.read_bytes(), []).append(f"{crate}: {f.name}")
+    out = [
+        f"Third-party notices for {recipe['name']} {recipe['version']} as basalt builds it.\n\n"
+        f"The license files of the {len(seen)} crates it is built from, each distinct text once,\n"
+        "after the crates and files that carry it. The program's own license files are beside\n"
+        "this one.\n".encode()
+    ]
+    for text, holders in sorted(texts.items(), key=lambda kv: sorted(kv[1])):
+        out.append(b"\n" + b"=" * 78 + b"\n")
+        out += [f"{h}\n".encode() for h in sorted(holders)]
+        out.append(b"=" * 78 + b"\n\n" + text.rstrip(b"\n") + b"\n")
+    dest.write_bytes(b"".join(out))
+    return dest
 
 
 def sha256(path):
@@ -112,7 +276,7 @@ def run(cmd, cwd, env=None):
 def build_ripgrep_shape(recipe, nife, work, triples):
     """The crate, its one patched dependency, built for each triple.
 
-    Returns ({triple: elf path}, [each fetched source file])."""
+    Returns ({triple: elf path}, [each fetched source file], [(doc member, path)])."""
     name, version = recipe["crate"], recipe["version"]
     crate_file = fetch_crate(name, version, recipe["sha256"], work)
     sources = [crate_file]
@@ -146,6 +310,9 @@ def build_ripgrep_shape(recipe, nife, work, triples):
                 continue
             kept.append(line)
         lock.write_text("\n".join(kept) + "\n")
+    docs = license_docs(recipe, src)
+    notices = work / f"{name}-{version}.{NOTICES}"
+    docs.append((LICENSE_PREFIX + NOTICES, third_party_notices(recipe, src, config, notices)))
     run(["cargo", "xtask", "std-src"], cwd=nife)
     out = {}
     for triple in triples:
@@ -185,12 +352,14 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         elf = dest / recipe["program"]
         shutil.copyfile(src / "target" / triple / "release" / recipe["program"], elf)
         out[triple] = elf
-    return out, sources
+    return out, sources, docs
 
 
 def build_c_shape(recipe, nife, work, triples):
     """C sources compiled against the pinned nife's C library, one object per `[[object]]`, and
-    linked by that nife's `helpers/build-c-program.sh`. Returns ({triple: elf path}, [source]).
+    linked by that nife's `helpers/build-c-program.sh`.
+
+    Returns ({triple: elf path}, [each fetched source file], [(doc member, path)]).
 
     Everything that makes a C program a nife program is the pinned commit's, so nothing here can
     drift from it: the compiler (`helpers/c-library-cc.sh`), the target and library flags and
@@ -203,6 +372,7 @@ def build_c_shape(recipe, nife, work, triples):
         fetch(source["url"], src / source["url"].rsplit("/", 1)[1], source["sha256"])
         for source in recipe["source"]
     ]
+    docs = license_docs(recipe, src)
     cc = subprocess.run(
         [nife / "helpers" / "c-library-cc.sh"], cwd=nife, check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -231,17 +401,25 @@ def build_c_shape(recipe, nife, work, triples):
         # spawnproto::IMAGE_MAX_PAGES). The manifest note is an allocated PT_NOTE, which this keeps.
         run([objcopy, "--strip-all", nife / "target" / program / triple / program, elf], cwd=nife)
         out[triple] = elf
-    return out, sources
+    return out, sources, docs
 
 
-def pack(recipe, nife, triple, elf):
-    """One nife package through nife's own producer. Returns its path."""
+def pack(recipe, nife, triple, elf, docs):
+    """One nife package through nife's own producer: the program, then each doc member. Returns
+    its stem and path."""
     architecture = triple.split("-")[0]
     nife_recipe = elf.parent / f"{recipe['name']}-{architecture}.recipe.toml"
+    # nife's producer reads a member's file by a path inside the nife checkout.
+    members = [(f"bin/{recipe['program']}", elf)]
+    for member, path in docs:
+        copy = elf.parent / member
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, copy)
+        members.append((member, copy))
     nife_recipe.write_text(
         f'name = "{recipe["name"]}"\nversion = "{recipe["version"]}"\n'
-        f'architecture = "{architecture}"\n\n[[member]]\nname = "bin/{recipe["program"]}"\n'
-        f'file = "{elf.relative_to(nife)}"\n'
+        f'architecture = "{architecture}"\n'
+        + "".join(f'\n[[member]]\nname = "{m}"\nfile = "{f.relative_to(nife)}"\n' for m, f in members)
     )
     run(["cargo", "xtask", "package", nife_recipe], cwd=nife)
     stem = f"{recipe['name']}-{recipe['version']}-{architecture}"
@@ -290,6 +468,7 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
 
 
 def build(nife, repository, triples):
+    check()
     nife = nife.resolve()
     targets = repository / CHANNEL / "targets"
     metadata = repository / CHANNEL / "metadata"
@@ -304,9 +483,9 @@ def build(nife, repository, triples):
     for path in sorted((BASALT / "recipes").glob("*.toml")):
         recipe = tomllib.loads(path.read_text())
         shape = build_c_shape if "object" in recipe else build_ripgrep_shape
-        elfs, sources = shape(recipe, nife, work, triples)
+        elfs, sources, docs = shape(recipe, nife, work, triples)
         for triple, elf in elfs.items():
-            stem, package = pack(recipe, nife, triple, elf)
+            stem, package = pack(recipe, nife, triple, elf, docs)
             shutil.copyfile(package, targets / f"{stem}.nifepkg")
             lines.append(f"{stem} sha256:{sha256(package)}\n")
         archive = source_dir / f"{recipe['name']}-{recipe['version']}-source.tar.gz"
@@ -384,8 +563,11 @@ def main():
     p.add_argument("repository", type=pathlib.Path)
     p.add_argument("site", type=pathlib.Path)
     p.add_argument("--release", required=True, help="the Release's download URL prefix")
+    sub.add_parser("check", help="refuse a recipe with no license or license files")
     args = parser.parse_args()
-    if args.verb == "build":
+    if args.verb == "check":
+        check()
+    elif args.verb == "build":
         build(args.nife, args.repository.resolve(), args.triples)
     else:
         publish(args.repository.resolve(), args.site.resolve(), args.release)

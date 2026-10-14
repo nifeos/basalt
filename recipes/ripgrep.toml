@@ -26,6 +26,11 @@ sha256 = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9"
 # The program, as the package carries it: the member `bin/rg`, so `jig install ripgrep` installs the
 # program `rg` (nife's `package_archive::PROGRAM_PREFIX`).
 program = "rg"
+# What upstream licenses it under (SPDX), and the files inside the crate the package carries as
+# `doc/<file name>`. The package also carries `doc/THIRD-PARTY-NOTICES`, the license files of the
+# crates ripgrep is built from, which helpers/packages.py writes from the locked dependency graph.
+license = "Unlicense OR MIT"
+license_files = ["COPYING", "LICENSE-MIT", "UNLICENSE"]
 
 [[patch]]
 crate = "ignore"
