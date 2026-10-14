@@ -58,7 +58,7 @@ are provisional until 918 lands its member convention.
 
 Two recipe shapes are understood, each with one program. A recipe naming a `crate` is a Rust crate
 with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
-compiled against the pinned nife's C library (ioping, nife milestone 906).
+compiled against the pinned nife's C library (ioping and hackbench, nife milestones 906 and 907).
 
 Name and interface provisional.
 """
@@ -80,6 +80,7 @@ import tomllib
 import urllib.request
 
 BASALT = pathlib.Path(__file__).resolve().parent.parent
+USER_AGENT = "basalt-packages (https://github.com/nifeos/basalt)"
 TRIPLES = ["aarch64-unknown-nife", "riscv64-unknown-nife", "x86_64-unknown-nife"]
 CHANNEL = "rolling"
 
@@ -248,7 +249,10 @@ def fetch(url, path, want):
     """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does."""
     if not path.exists() or sha256(path) != want:
         print(f"packages: fetching {url}")
-        with urllib.request.urlopen(url, timeout=120) as r:
+        # A named User-Agent: kernel.org refuses Python's default one with 403. The digest, not
+        # the transport, decides whether the bytes are taken.
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=120) as r:
             path.write_bytes(r.read())
     got = sha256(path)
     if got != want:
@@ -355,6 +359,15 @@ def build_ripgrep_shape(recipe, nife, work, triples):
     return out, sources, docs
 
 
+def source_name(source):
+    """The name a C recipe's source is saved under: its `file`, or else the URL's last component.
+    A URL that ends in a query (kernel.org's cgit names the tag with `?h=`) needs `file`."""
+    name = source.get("file") or source["url"].rsplit("/", 1)[1]
+    if "/" in name or "?" in name or name in ("", ".", ".."):
+        fail(f"source {source['url']}: {name!r} is not a file name; give the source a `file`")
+    return name
+
+
 def build_c_shape(recipe, nife, work, triples):
     """C sources compiled against the pinned nife's C library, one object per `[[object]]`, and
     linked by that nife's `helpers/build-c-program.sh`.
@@ -369,7 +382,7 @@ def build_c_shape(recipe, nife, work, triples):
     src = work / recipe["name"]
     src.mkdir(parents=True, exist_ok=True)
     sources = [
-        fetch(source["url"], src / source["url"].rsplit("/", 1)[1], source["sha256"])
+        fetch(source["url"], src / source_name(source), source["sha256"])
         for source in recipe["source"]
     ]
     docs = license_docs(recipe, src)

@@ -32,10 +32,11 @@ does not know basalt exists.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
-  either (`helpers/packages.py check`). Today there are two.
+  either (`helpers/packages.py check`). Today there are three.
   [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
-  SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) names one C file
-  pinned by SHA-256 and the flags it is compiled with against the pinned nife's C library.
+  SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) and
+  [`hackbench`](recipes/hackbench.toml) each name one C file pinned by SHA-256 and the flags it is
+  compiled with against the pinned nife's C library.
 - [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
   recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
   walker on nife.
@@ -54,8 +55,8 @@ does not know basalt exists.
   the prompt on aarch64, riscv64 and x86_64 (nife milestone 810).
 - Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
   index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
-  published with its source archive beside it, on the Release and on Pages. ioping is
-  GPL-3.0-or-later, so its binaries may only be offered that way; every package gets the same
+  published with its source archive beside it, on the Release and on Pages. ioping and hackbench
+  are GPL, so their binaries may only be offered that way; every package gets the same
   treatment so no recipe has to remember.
 
 ## Licenses

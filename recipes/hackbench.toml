@@ -1,0 +1,47 @@
+# hackbench, as a basalt package: the scheduler benchmark and multicore soak nife milestone 827
+# (hackbench on nife and Linux) runs on silicon, packaged by nife milestone 907 (hackbench is
+# packaged in basalt). Optional, never in a base image: `jig install hackbench` installs the program
+# `hackbench`.
+#
+# What is pinned, and how helpers/packages.py checks each pin before anything is built:
+#
+# - The source: rt-tests 2.11's `src/hackbench/hackbench.c`, one file, from the `v2.11` tag on
+#   kernel.org, refused unless its SHA-256 is `sha256` below (the SHA-256 nife's
+#   helpers/build-hackbench.sh pinned, read 2026-10-12 UTC), and rt-tests' `COPYING` from the same
+#   tag. kernel.org's cgit names the tag in a query, so each source names the `file` it is saved as.
+#   The source is compiled untouched.
+# - The compiler, the C library's flags and headers, the link with its threads, the standard
+#   library and the manifest note all come from the nife commit pins.toml names, as for ioping.
+#
+# Upstream ships a man page, `src/hackbench/hackbench.8` at the same tag. The package does not
+# carry it yet: `jig` installs no documentation.
+#
+# Every key and the file's layout are provisional.
+
+name = "hackbench"
+version = "2.11"
+program = "hackbench"
+# What upstream licenses it under (SPDX), and the files the package carries as `doc/<file name>`:
+# rt-tests' `COPYING` (the GPL, version 2). `hackbench.c`'s own header reads
+# `SPDX-License-Identifier: GPL-2.0-or-later`.
+license = "GPL-2.0-or-later"
+license_files = ["COPYING"]
+
+[[source]]
+url = "https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git/plain/src/hackbench/hackbench.c?h=v2.11"
+file = "hackbench.c"
+sha256 = "36e5b4c86aee10fa7422e16c2a3cb218e7b040a364fe52f943ad8d68b167ac3e"
+
+[[source]]
+url = "https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git/plain/COPYING?h=v2.11"
+file = "COPYING"
+sha256 = "ab15fd526bd8dd18a9e77ebc139656bf4d33e97fc7238cd11bf60e2b9b8666c6"
+
+# One object, compiled with the pinned nife's C library flags and then these. `-D_GNU_SOURCE
+# -DVERSION=2.11 -O2` are rt-tests' Makefile's. `-Wno-incompatible-pointer-types`: hackbench passes
+# a `struct sockaddr_in *` to `bind`, `getsockname`, `connect` and `accept` (its `--inet` mode).
+# glibc declares those parameters as a transparent union under `_GNU_SOURCE`; nife's C library
+# declares a plain `struct sockaddr *`, which clang refuses by default. The pointers are the same.
+[[object]]
+source = "hackbench.c"
+cflags = ["-O2", "-D_GNU_SOURCE", "-DVERSION=2.11", "-Wno-incompatible-pointer-types"]
