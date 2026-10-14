@@ -1,0 +1,14 @@
+# Python bytecode from helpers/ (a run of helpers/packages.py leaves one).
+__pycache__/
+*.pyc
+
+# What `helpers/packages.py build` and `publish` write when run by hand at the root, as the
+# README's examples do.
+/repository/
+/site/
+
+# macOS finder junk.
+.DS_Store
+
+# ruff's cache, from `ruff check` run by hand.
+.ruff_cache/

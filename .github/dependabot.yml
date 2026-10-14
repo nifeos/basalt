@@ -1,0 +1,15 @@
+# Dependabot keeps the GitHub Actions the workflows pin current, by opening pull requests the
+# required checks then run on. The actions are pinned by commit SHA with the tag in a comment, as
+# nife's are; Dependabot updates both. basalt has no package manifest of its own (its Python helpers
+# use only the standard library), so this is the one ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

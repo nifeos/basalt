@@ -1,0 +1,16 @@
+# Spell checking for the tree: the `lint` job in .github/workflows/gate.yml runs `typos`. Patches
+# are diffs against upstream text, so their typos are not basalt's to fix.
+
+[files]
+extend-exclude = ["patches/"]
+
+[default]
+# A hex digest prefix is not a word (nife's _typos.toml has the reasoning).
+extend-ignore-re = ["\\b[0-9a-f]{12,}\\b"]
+
+[default.extend-words]
+# Eduard Suess's name for the Earth's nickel-iron core, and the kernel's name. `typos` reads it as
+# a misspelling of "knife".
+nife = "nife"
+Nife = "Nife"
+NIFE = "NIFE"

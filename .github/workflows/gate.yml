@@ -16,7 +16,11 @@
 # there are about the same host. One job per run and `concurrency` cancelling superseded runs on
 # branches keep the cost at one runner per pin.
 #
-# Names provisional: the file, the workflow and the job.
+# A second job, `lint`, checks basalt's own files in seconds: every recipe names its license
+# (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), and typos on the tree
+# (_typos.toml). It is not one of the required checks.
+#
+# Names provisional: the file, the workflow and the jobs.
 name: gate
 
 on:
@@ -42,8 +46,7 @@ jobs:
     # runaway guard, not an estimate.
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
         id: pin
         run: |
@@ -52,7 +55,7 @@ jobs:
       # nife is public, so the default token reads it; persist-credentials is off because nothing
       # here pushes to it.
       - name: Check out nife at the pinned commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ steps.pin.outputs.slug }}
           ref: ${{ steps.pin.outputs.commit }}
@@ -70,7 +73,7 @@ jobs:
           echo "## nife at \`$PIN\`" >> "$GITHUB_STEP_SUMMARY"
           git log -1 --format='%cd (UTC) %s' --date=format-local:'%Y-%m-%d %H:%M' >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: nife -> target
 
@@ -78,7 +81,7 @@ jobs:
       # under the same key shape nife uses. Caches do not cross repositories, so basalt's first run
       # builds it once.
       - name: Cache QEMU
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/nife-qemu
           key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
@@ -118,9 +121,24 @@ jobs:
           ls -l "$RUNNER_TEMP/images"
       - name: Keep the images
         if: always() && steps.pin.outcome == 'success'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nife-${{ steps.pin.outputs.commit }}-images
           retention-days: 14
           if-no-files-found: warn
           path: ${{ runner.temp }}/images/
+
+  lint:
+    name: lint (recipes, ruff, typos)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Every recipe names its license and license files
+        run: python3 helpers/packages.py check
+      - name: ruff
+        run: pipx run ruff==0.16.9 check helpers/
+      - name: typos
+        uses: crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53 # v1.50.2

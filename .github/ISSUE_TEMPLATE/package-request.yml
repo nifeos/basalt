@@ -1,0 +1,75 @@
+# Name: provisional.
+name: Package request
+description: A program basalt should build and publish for nife.
+labels: ["package-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A package is a recipe in `recipes/` that pins the upstream source by SHA-256, names its
+        license and license files, and builds against nife's pinned C library or Rust standard
+        library. CONTRIBUTING.md says what a recipe needs; the more of it you can supply here, the
+        sooner it can be written.
+
+  - type: input
+    id: program
+    attributes:
+      label: Program and upstream
+      description: The program's name and its upstream repository or crate.
+      placeholder: ioping, https://github.com/koct9i/ioping
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The upstream release or tag to build.
+    validations:
+      required: true
+
+  - type: input
+    id: license
+    attributes:
+      label: License
+      description: The upstream license as an SPDX expression, and where its text lives in the source.
+      placeholder: GPL-3.0-or-later, LICENSE
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - Rust
+        - C
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What it is for
+      description: Who would install it on nife, and what they would do with it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation upstream ships
+      description: Man pages, markdown guides, or none. A package carries its program's documentation.
+    validations:
+      required: false
+
+  - type: textarea
+    id: porting
+    attributes:
+      label: What it needs from nife
+      description: >-
+        Optional. System calls, threads, sockets, files or devices it uses, and anything you already
+        know fails on nife.
+    validations:
+      required: false

@@ -22,7 +22,10 @@ does not know basalt exists.
 - [`gate`](.github/workflows/gate.yml) checks out the pinned commit and runs nife's own
   `script/ci-build test` there: the toolchain and QEMU that commit names, then each architecture's
   kernel and programs built and the system test suite booted under QEMU on aarch64, riscv64 and
-  x86_64. The test kernels and program archives are kept as the run's artifact for 14 days.
+  x86_64. The test kernels and program archives are kept as the run's artifact for 14 days. Its
+  `lint` job runs `helpers/packages.py check`, ruff on `helpers/*.py` and typos on the tree.
+- [`codeql`](.github/workflows/codeql.yml) scans the workflows and the Python helpers. Dependabot
+  keeps the actions current; every action is pinned by commit SHA.
 - [`pin bump`](.github/workflows/pin-bump.yml) runs daily at 06:17 UTC. If nife's `main` has moved,
   it rewrites the pin on the branch `pin/nife` and opens (or updates) one pull request, and the gate
   runs on it.
@@ -120,6 +123,9 @@ commit carries.
 Every name here (the manifest's file name, its keys, the workflows, the branch `pin/nife`, the
 Release tags) is provisional.
 
+Contributing, the gates and reporting a bad package: [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md). Agents start at [AGENTS.md](AGENTS.md).
+
 ## EXAMPLES
 
 Pin nife at a specific commit by hand and see whether it passes:
@@ -178,8 +184,8 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   `AUTOMATION_APP_ID` and `AUTOMATION_APP_KEY`. Without them it falls back to `github.token`, which
   starts no workflow (the bump then starts the gate itself) and cannot open a pull request unless
   "Allow GitHub Actions to create and approve pull requests" is on.
-- **Nothing protects `main` yet.** There is no ruleset, no required check and no merge queue, so the
-  gate reports but does not block, and the bump's pull request is merged by a person.
+- **`main` has required checks and no merge queue.** The four checks CONTRIBUTING.md lists must
+  pass on a pull request, and the bump's pull request is merged by a person.
 - **GitHub suspends scheduled workflows after 60 days with no activity in the repository.** A bump
   pull request nobody merges is not activity.
 - **Until the gate has run on `main`, every pull request builds QEMU from source** (about 4.3

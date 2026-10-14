@@ -43,14 +43,13 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
         id: pin
         run: helpers/pins.py get nife | tee -a "$GITHUB_OUTPUT"
 
       - name: Check out nife at the pinned commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ steps.pin.outputs.slug }}
           ref: ${{ steps.pin.outputs.commit }}
@@ -75,7 +74,7 @@ jobs:
           NIFE_CC: clang-19
 
       - name: Keep the repository
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: repository
           retention-days: 14
@@ -95,14 +94,13 @@ jobs:
           - row: swish-check-x86_64
             runner: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
         id: pin
         run: helpers/pins.py get nife | tee -a "$GITHUB_OUTPUT"
 
       - name: Check out nife at the pinned commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ steps.pin.outputs.slug }}
           ref: ${{ steps.pin.outputs.commit }}
@@ -110,7 +108,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache QEMU
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/nife-qemu
           key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
@@ -136,7 +134,7 @@ jobs:
           ls -l /dev/kvm
 
       - name: Fetch the repository
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: repository
           path: repository
@@ -162,7 +160,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       DOMAIN: basalt.nifeos.org
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -182,7 +180,7 @@ jobs:
           [ "$(echo "$site" | jq -r .https_enforced)" = true ] || echo "::warning::HTTPS is not enforced on $DOMAIN yet"
 
       - name: Fetch the repository the build made and the install proved
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: repository
           path: repository
@@ -243,9 +241,9 @@ jobs:
               --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
           fi
 
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
