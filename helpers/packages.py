@@ -58,7 +58,8 @@ are provisional until 918 lands its member convention.
 
 Two recipe shapes are understood, each with one program. A recipe naming a `crate` is a Rust crate
 with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
-compiled against the pinned nife's C library (ioping and hackbench, nife milestones 906 and 907).
+compiled against the pinned nife's C library (ioping, hackbench and SQLite, nife milestones 906, 907
+and 897); a source with `unpack = true` is a zip extracted beside it, no member outside it.
 
 Name and interface provisional.
 """
@@ -78,6 +79,7 @@ import tarfile
 import tempfile
 import tomllib
 import urllib.request
+import zipfile
 
 BASALT = pathlib.Path(__file__).resolve().parent.parent
 USER_AGENT = "basalt-packages (https://github.com/nifeos/basalt)"
@@ -368,6 +370,29 @@ def source_name(source):
     return name
 
 
+def unpack_zip(archive, into):
+    """Extract a source's zip into `into`, refusing a member that would land outside it.
+
+    The zip is already pinned by its SHA-256, so a hostile member would need a reviewed recipe
+    to vouch for it; the check is the second lock. An absolute name, a `..` step, a drive letter
+    and a symbolic link (a zip can carry one in its Unix mode bits) are each refused by name."""
+    root = into.resolve()
+    with zipfile.ZipFile(archive) as z:
+        for info in z.infolist():
+            name = info.filename
+            target = (root / name).resolve()
+            if (
+                name.startswith(("/", "\\"))
+                or ":" in name
+                or ".." in pathlib.PurePosixPath(name).parts
+                or not target.is_relative_to(root)
+            ):
+                fail(f"{archive.name}: member {name!r} would land outside {root}; refusing it")
+            if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                fail(f"{archive.name}: member {name!r} is a symbolic link; refusing it")
+        z.extractall(root)
+
+
 def build_c_shape(recipe, nife, work, triples):
     """C sources compiled against the pinned nife's C library, one object per `[[object]]`, and
     linked by that nife's `helpers/build-c-program.sh`.
@@ -385,6 +410,11 @@ def build_c_shape(recipe, nife, work, triples):
         fetch(source["url"], src / source_name(source), source["sha256"])
         for source in recipe["source"]
     ]
+    # A source with `unpack = true` is a zip (SQLite's amalgamation), extracted beside it after its
+    # digest is checked; the recipe's objects then name files inside it.
+    for source, path in zip(recipe["source"], sources):
+        if source.get("unpack"):
+            unpack_zip(path, src)
     docs = license_docs(recipe, src)
     cc = subprocess.run(
         [nife / "helpers" / "c-library-cc.sh"], cwd=nife, check=True, capture_output=True, text=True

@@ -1,0 +1,57 @@
+# SQLite, as a basalt package: the engine nife milestone 831 (SQLite's speedtest1 on nife and
+# Linux) benchmarks, packaged by nife milestone 897 (SQLite is packaged in basalt). Optional, never
+# in a base image. Today it carries one program, SQLite's own benchmark `speedtest1`, so
+# `jig install sqlite` installs `speedtest1`; the `sqlite3` shell (`shell.c`, in the same zip) is
+# not built yet.
+#
+# What is pinned, and how helpers/packages.py checks each pin before anything is built:
+#
+# - The amalgamation: sqlite.org's 3.50.4 release zip (`sqlite3.c`, `sqlite3.h`), refused unless
+#   its SHA-256 is `sha256` below, then unpacked with every member checked to stay inside the
+#   build directory. sqlite.org publishes the zip's SHA3-256; the SHA-256 here is of what was
+#   fetched, read 2026-10-10 UTC by nife's helpers/build-speedtest1.sh.
+# - `test/speedtest1.c` at the `version-3.50.4` tag of SQLite's GitHub mirror, since the zip does
+#   not carry it, and `LICENSE.md` from the same tag.
+# - The compiler, the C library's flags and headers, the link, the standard library and the
+#   manifest note all come from the nife commit pins.toml names, as for ioping.
+#
+# Every key and the file's layout are provisional, and so is the package name `sqlite`.
+
+name = "sqlite"
+version = "3.50.4"
+program = "speedtest1"
+# SQLite is public domain, which has no SPDX identifier of its own. `blessing` is SPDX's
+# identifier for the SQLite Blessing, the dedication every SQLite source file opens with, and the
+# one Fedora's sqlite package uses. `LICENSE.md` is the repository's statement that the code is
+# public domain.
+license = "blessing"
+license_files = ["LICENSE.md"]
+
+[[source]]
+url = "https://www.sqlite.org/2025/sqlite-amalgamation-3500400.zip"
+sha256 = "1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032"
+unpack = true
+
+[[source]]
+url = "https://raw.githubusercontent.com/sqlite/sqlite/version-3.50.4/test/speedtest1.c"
+sha256 = "f495cd1c3f727ebf6270d967b43f11a14304053ae4532d6338dbfea65c1a5a78"
+
+[[source]]
+url = "https://raw.githubusercontent.com/sqlite/sqlite/version-3.50.4/LICENSE.md"
+sha256 = "a7a58d6022c090c528e3167026167b3141d682efc6a3c188b473ba59f1788fc7"
+
+# Two objects, compiled with the pinned nife's C library flags and then these. Two compile-time
+# options SQLite documents for this case: `SQLITE_THREADSAFE=0` (the build nife's helper made,
+# single-threaded) and `SQLITE_OMIT_LOAD_EXTENSION` (nife links statically and has no `dlopen`).
+# The same flags build the Linux row of nife milestone 831, so the two programs differ only in
+# their C library.
+[[object]]
+source = "sqlite-amalgamation-3500400/sqlite3.c"
+cflags = ["-O2", "-DSQLITE_THREADSAFE=0", "-DSQLITE_OMIT_LOAD_EXTENSION"]
+
+[[object]]
+source = "speedtest1.c"
+cflags = [
+    "-O2", "-DSQLITE_THREADSAFE=0", "-DSQLITE_OMIT_LOAD_EXTENSION",
+    "-Isqlite-amalgamation-3500400",
+]
