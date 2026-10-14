@@ -33,8 +33,9 @@ The copy under targets/ is nife's section 250, clause 9 (2026-10-10 amendment): 
 keeps a copy under its own targets/, which is tried last". It is the fallback when the Release
 cannot be reached; calef has not ruled on dropping it.
 
-Only ripgrep's recipe shape is understood today (a crate, one patched dependency, one program).
-That is all basalt builds; a second shape is added with the second recipe that needs it.
+Two recipe shapes are understood, each with one program. A recipe naming a `crate` is a Rust crate
+with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
+compiled against the pinned nife's C library (ioping, nife milestone 906).
 
 Name and interface provisional.
 """
@@ -65,19 +66,23 @@ def sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def fetch_crate(crate, version, want, work):
-    """The .crate file, from crates.io, refused unless it hashes to `want`."""
-    path = work / f"{crate}-{version}.crate"
+def fetch(url, path, want):
+    """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does."""
     if not path.exists() or sha256(path) != want:
-        url = f"https://static.crates.io/crates/{crate}/{crate}-{version}.crate"
         print(f"packages: fetching {url}")
         with urllib.request.urlopen(url, timeout=120) as r:
             path.write_bytes(r.read())
     got = sha256(path)
     if got != want:
         path.unlink()
-        fail(f"{crate}-{version}.crate has SHA-256 {got}, not the recipe's {want}; refusing it")
+        fail(f"{url} has SHA-256 {got}, not the recipe's {want}; refusing it")
     return path
+
+
+def fetch_crate(crate, version, want, work):
+    """The .crate file, from crates.io, refused unless it hashes to `want`."""
+    url = f"https://static.crates.io/crates/{crate}/{crate}-{version}.crate"
+    return fetch(url, work / f"{crate}-{version}.crate", want)
 
 
 def unpack(crate_file, work):
@@ -163,6 +168,50 @@ def build_ripgrep_shape(recipe, nife, work, triples):
     return out
 
 
+def build_c_shape(recipe, nife, work, triples):
+    """C sources compiled against the pinned nife's C library, one object per `[[object]]`, and
+    linked by that nife's `helpers/build-c-program.sh`. Returns {triple: elf path}.
+
+    Everything that makes a C program a nife program is the pinned commit's, so nothing here can
+    drift from it: the compiler (`helpers/c-library-cc.sh`), the target and library flags and
+    headers (`helpers/c-library-cflags.sh`), and the link with the standard library and the
+    manifest note (`helpers/build-c-program.sh`, which runs `cargo xtask std-src` and `cargo xtask
+    foreign-note`). The recipe adds only its own sources and flags."""
+    src = work / recipe["name"]
+    src.mkdir(parents=True, exist_ok=True)
+    for source in recipe["source"]:
+        fetch(source["url"], src / source["url"].rsplit("/", 1)[1], source["sha256"])
+    cc = subprocess.run(
+        [nife / "helpers" / "c-library-cc.sh"], cwd=nife, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    sysroot = subprocess.run(
+        ["rustc", "--print", "sysroot"], cwd=nife, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    objcopy = next(pathlib.Path(sysroot, "lib", "rustlib").glob("*/bin/llvm-objcopy"))
+    out = {}
+    for triple in triples:
+        flags = subprocess.run(
+            [nife / "helpers" / "c-library-cflags.sh", triple],
+            cwd=nife, check=True, capture_output=True, text=True,
+        ).stdout.split()
+        objects = []
+        for obj in recipe["object"]:
+            o = work / recipe["name"] / "obj" / triple / (pathlib.Path(obj["source"]).stem + ".o")
+            o.parent.mkdir(parents=True, exist_ok=True)
+            run([cc, *flags, *obj.get("cflags", []), "-c", src / obj["source"], "-o", o], cwd=src)
+            objects.append(o)
+        program = recipe["program"]
+        run([nife / "helpers" / "build-c-program.sh", program, triple, *objects], cwd=nife)
+        dest = nife / "target" / "basalt" / recipe["name"] / triple
+        dest.mkdir(parents=True, exist_ok=True)
+        elf = dest / program
+        # Symbols too, as ripgrep's build strips them: a package may be at most 4 MiB (nife's
+        # spawnproto::IMAGE_MAX_PAGES). The manifest note is an allocated PT_NOTE, which this keeps.
+        run([objcopy, "--strip-all", nife / "target" / program / triple / program, elf], cwd=nife)
+        out[triple] = elf
+    return out
+
+
 def pack(recipe, nife, triple, elf):
     """One nife package through nife's own producer. Returns its path."""
     architecture = triple.split("-")[0]
@@ -190,7 +239,8 @@ def build(nife, repository, triples):
     work.mkdir(exist_ok=True)
     for path in sorted((BASALT / "recipes").glob("*.toml")):
         recipe = tomllib.loads(path.read_text())
-        for triple, elf in build_ripgrep_shape(recipe, nife, work, triples).items():
+        shape = build_c_shape if "object" in recipe else build_ripgrep_shape
+        for triple, elf in shape(recipe, nife, work, triples).items():
             stem, package = pack(recipe, nife, triple, elf)
             shutil.copyfile(package, targets / f"{stem}.nifepkg")
             lines.append(f"{stem} sha256:{sha256(package)}\n")

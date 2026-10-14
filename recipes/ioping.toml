@@ -1,0 +1,36 @@
+# ioping, as a basalt package: the storage-latency tool nife milestone 834 (ioping on nife and
+# Linux) runs on silicon, and the first C program basalt builds (nife milestone 906, ioping is
+# packaged in basalt). Optional, never in a base image: `jig install ioping` installs the program
+# `ioping`.
+#
+# What is pinned, and how helpers/packages.py checks each pin before anything is built:
+#
+# - The source: ioping 1.3's one C file, `ioping.c` at the `v1.3` tag of its GitHub repository,
+#   refused unless its SHA-256 is `sha256` below. It equals the `ioping.c` in the v1.3 release
+#   tarball (read 2026-10-10 UTC). The source is compiled untouched; ioping takes its generic path
+#   on a platform that is neither Linux nor a BSD.
+# - The compiler, the C library's flags and headers, the link, the standard library and the
+#   manifest note all come from the nife commit pins.toml names: its `helpers/c-library-cc.sh`,
+#   `helpers/c-library-cflags.sh` and `helpers/build-c-program.sh`, as nife's own helper used them.
+#
+# ioping is GPL-3.0-or-later, so the package is GPL; nife's section 135 (running GPL software is
+# aggregation) covers a program nife runs.
+#
+# Upstream ships a man page, `ioping.1` at the same tag. The package does not carry it yet: `jig`
+# installs no documentation.
+#
+# Every key and the file's layout are provisional.
+
+name = "ioping"
+version = "1.3"
+program = "ioping"
+
+[[source]]
+url = "https://raw.githubusercontent.com/koct9i/ioping/v1.3/ioping.c"
+sha256 = "4336abbf0b71df3e006769b7913879a2fcdb59531a9e773fc5af74c08fb408e0"
+
+# One object per entry, compiled with the pinned nife's C library flags and then these. `-std=gnu99`
+# and an empty `EXTRA_VERSION` are what ioping's own Makefile passes.
+[[object]]
+source = "ioping.c"
+cflags = ["-O2", "-std=gnu99", "-DEXTRA_VERSION=\"\""]
