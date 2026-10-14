@@ -1,0 +1,10 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A package that should not be installed, or a way to make basalt publish one
+    url: https://github.com/nifeos/basalt/blob/main/SECURITY.md
+    about: >-
+      Report it privately, never as a public issue. SECURITY.md says how and what is in scope.
+  - name: A problem in nife itself
+    url: https://github.com/nifeos/nife/issues
+    about: >-
+      The kernel, its programs and jig live in nife. basalt only builds and publishes packages.

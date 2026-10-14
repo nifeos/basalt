@@ -306,7 +306,7 @@ def build_ripgrep_shape(recipe, nife, work, triples):
                 inside = True
             elif line == "":
                 inside = False
-            if inside and (line.startswith("source = ") or line.startswith("checksum = ")):
+            if inside and line.startswith(("source = ", "checksum = ")):
                 continue
             kept.append(line)
         lock.write_text("\n".join(kept) + "\n")
