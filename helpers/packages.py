@@ -56,8 +56,9 @@ are provisional until 918 lands its member convention.
 
     helpers/packages.py check
 
-Two recipe shapes are understood, each with one program. A recipe naming a `crate` is a Rust crate
-with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
+Three recipe shapes are understood, each with one program. A recipe with a `[nife]` table is a
+first-party program, a `[[bin]]` of the pinned nife's own workspace (rmle). A recipe naming a
+`crate` is a Rust crate with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
 compiled against the pinned nife's C library (ioping, hackbench and SQLite, nife milestones 906, 907
 and 897); a source with `unpack = true` is a zip extracted beside it, no member outside it.
 
@@ -447,6 +448,42 @@ def build_c_shape(recipe, nife, work, triples):
     return out, sources, docs
 
 
+# nife's bare-metal target for each nife triple: a first-party program on nife's own runtime is
+# built for these, as nife's archive builds it (its `archive::build_programs`).
+NATIVE_TARGETS = {
+    "aarch64-unknown-nife": "aarch64-unknown-none-softfloat",
+    "riscv64-unknown-nife": "riscv64imac-unknown-none-elf",
+    "x86_64-unknown-nife": "x86_64-unknown-none",
+}
+
+
+def build_nife_shape(recipe, nife, work, triples):
+    """A first-party program: one `[[bin]]` of the pinned nife's own workspace, built at that commit
+    for each bare-metal target, in its release profile, symbols stripped.
+
+    Returns ({triple: elf path}, [], [(doc member, path)]). The source is the nife commit itself,
+    which `BUILT-FROM` names, so nothing is fetched, and the license files are read from that
+    checkout."""
+    del work
+    package, program = recipe["nife"]["package"], recipe["program"]
+    docs = license_docs(recipe, nife)
+    sysroot = subprocess.run(
+        ["rustc", "--print", "sysroot"], cwd=nife, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    objcopy = next(pathlib.Path(sysroot, "lib", "rustlib").glob("*/bin/llvm-objcopy"))
+    out = {}
+    for triple in triples:
+        target = NATIVE_TARGETS[triple]
+        run(["cargo", "build", "--release", "--locked", "-p", package, "--bin", program,
+             "--target", target], cwd=nife)
+        dest = nife / "target" / "basalt" / recipe["name"] / triple
+        dest.mkdir(parents=True, exist_ok=True)
+        elf = dest / program
+        run([objcopy, "--strip-all", nife / "target" / target / "release" / program, elf], cwd=nife)
+        out[triple] = elf
+    return out, [], docs
+
+
 def pack(recipe, nife, triple, elf, docs):
     """One nife package through nife's own producer: the program, then each doc member. Returns
     its stem and path."""
@@ -489,6 +526,12 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
         "recipe names; patches/ holds what the recipe applies to them. helpers/packages.py is\n"
         "the build: `helpers/packages.py build <nife checkout> <repository-dir>`.\n"
     )
+    if "nife" in recipe:
+        note += (
+            f"\nA first-party package: its source is that nife commit itself (the `[[bin]]`\n"
+            f"{recipe['program']} of its `{recipe['nife']['package']}` package), so upstream/ is "
+            "empty.\n"
+        )
     members = [(f"upstream/{s.name}", s.read_bytes()) for s in sources]
     for patch in recipe.get("patch", []):
         members.append((patch["file"], (BASALT / patch["file"]).read_bytes()))
@@ -525,7 +568,12 @@ def build(nife, repository, triples):
     work.mkdir(exist_ok=True)
     for path in sorted((BASALT / "recipes").glob("*.toml")):
         recipe = tomllib.loads(path.read_text())
-        shape = build_c_shape if "object" in recipe else build_ripgrep_shape
+        if "nife" in recipe:
+            shape = build_nife_shape
+        elif "object" in recipe:
+            shape = build_c_shape
+        else:
+            shape = build_ripgrep_shape
         elfs, sources, docs = shape(recipe, nife, work, triples)
         for triple, elf in elfs.items():
             stem, package = pack(recipe, nife, triple, elf, docs)
