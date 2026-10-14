@@ -27,14 +27,17 @@ does not know basalt exists.
   it rewrites the pin on the branch `pin/nife` and opens (or updates) one pull request, and the gate
   runs on it.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
-- [`recipes/`](recipes/) holds one recipe per package basalt builds. Today that is
-  [`ripgrep`](recipes/ripgrep.toml): the crate and its one patched dependency, each pinned by
-  SHA-256, and the program it installs as (`rg`).
+- [`recipes/`](recipes/) holds one recipe per package basalt builds. Today there are two.
+  [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
+  SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) names one C file
+  pinned by SHA-256 and the flags it is compiled with against the pinned nife's C library.
 - [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
   recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
   walker on nife.
 - [`helpers/packages.py`](helpers/packages.py) builds every recipe against a nife checkout, with
-  that checkout's toolchain, standard library, manifest note and `cargo xtask package`, and writes
+  that checkout's toolchain, standard library, manifest note and `cargo xtask package`. A C recipe
+  also takes that checkout's compiler, C library flags and link script
+  (`helpers/c-library-cc.sh`, `helpers/c-library-cflags.sh`, `helpers/build-c-program.sh`). It writes
   a repository in the layout nife's `jig` reads: `rolling/metadata/stand-in-index` and
   `rolling/targets/<stem>.nifepkg`.
 - [`packages`](.github/workflows/packages.yml) runs that build at the pin, keeps the repository as
@@ -138,8 +141,9 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 - **A recipe records the source's digest, not the package's.** Recording the package's needs the
   build to be reproducible across machines, which nobody has measured; the index carries the
   digest of what this run built.
-- **`helpers/packages.py` knows one recipe shape**, a crate with one patched dependency and one
-  program, because that is all there is.
+- **`helpers/packages.py` knows two recipe shapes**, a crate with patched dependencies and C
+  files compiled one object each, and either carries exactly one program. An archive to unpack
+  (SQLite's amalgamation is a zip) is not understood yet.
 
 - **The gate is one job, so a failing architecture can hide the ones after it.** `script/ci-build
   test` runs the three legs in order in one process. A per-architecture matrix would show each leg's
