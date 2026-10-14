@@ -63,8 +63,16 @@ jobs:
         env:
           NIFE_SKIP_LINT_TOOLS: "1"
 
+      # A C recipe compiles with the pinned nife's C library flags, and its aarch64 ABI flag
+      # (`-mabi=aapcs-soft`) is clang 19's. The runner's default clang is 18, which refuses it, so
+      # the build names clang 19 through `NIFE_CC`, which nife's helpers/c-library-cc.sh reads.
+      - name: Install clang 19 for the C recipes
+        run: sudo apt-get update && sudo apt-get install -y clang-19
+
       - name: Build the packages and the repository
         run: helpers/packages.py build nife repository
+        env:
+          NIFE_CC: clang-19
 
       - name: Keep the repository
         uses: actions/upload-artifact@v7
