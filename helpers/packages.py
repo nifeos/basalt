@@ -56,6 +56,10 @@ are provisional until 918 lands its member convention.
 
     helpers/packages.py check
 
+Every recipe records its packages' digests in a `[package_digest]` table, one SHA-256 per
+architecture, and `build` fails unless each package hashes to its line; `build --update-digests`
+rewrites the table instead (nife milestone 917, basalt's packages build reproducibly).
+
 Three recipe shapes are understood, each with one program. A recipe with a `[nife]` table is a
 first-party program, a `[[bin]]` of the pinned nife's own workspace (rmle). A recipe naming a
 `crate` is a Rust crate with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
@@ -77,7 +81,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import tomllib
 import urllib.request
 import zipfile
@@ -146,10 +149,31 @@ LICENSE_PREFIX = "doc/"
 NOTICES = "THIRD-PARTY-NOTICES"
 
 
-def check_recipe(path):
+# The recipe table that records each package's digest, one `<architecture> = "sha256:<hex>"` line per
+# nife architecture. The build refuses a package whose bytes hash to anything else (nife milestone
+# 917). The table is the last in the file, so `rewrite_digests` can replace it without parsing TOML.
+DIGEST_TABLE = "package_digest"
+ARCHITECTURES = [t.split("-")[0] for t in TRIPLES]
+DIGEST_NOTE = (
+    "# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>\n"
+    "# --update-digests` rewrites this table after a reviewed change.\n"
+)
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def check_recipe(path, digests_required=True):
     """The recipe's problems, as messages; empty when it may be built."""
     recipe = tomllib.loads(path.read_text())
     problems = []
+    recorded = recipe.get(DIGEST_TABLE)
+    if recorded is None:
+        if digests_required:
+            problems.append(f"has no [{DIGEST_TABLE}] table (run `helpers/packages.py build --update-digests`)")
+    elif not isinstance(recorded, dict) or sorted(recorded) != sorted(ARCHITECTURES) or not all(
+        isinstance(v, str) and DIGEST.fullmatch(v) for v in recorded.values()
+    ):
+        problems.append(f"[{DIGEST_TABLE}] must hold one `sha256:<64 hex digits>` per architecture: "
+                        + ", ".join(ARCHITECTURES))
     license = recipe.get("license")
     if not isinstance(license, str) or not license.strip():
         problems.append("names no `license` (an SPDX expression)")
@@ -169,15 +193,15 @@ def check_recipe(path):
     return [f"{path.relative_to(BASALT)}: {p}" for p in problems]
 
 
-def check():
+def check(digests_required=True):
     problems = []
     for path in sorted((BASALT / "recipes").glob("*.toml")):
-        problems += check_recipe(path)
+        problems += check_recipe(path, digests_required)
     for p in problems:
         print(f"packages: {p}", file=sys.stderr)
     if problems:
         fail(f"{len(problems)} recipe problem(s); see CONTRIBUTING.md")
-    print("packages: every recipe names its license and license files")
+    print("packages: every recipe names its license and license files, and its packages' digests")
 
 
 def license_docs(recipe, src):
@@ -280,6 +304,37 @@ def run(cmd, cwd, env=None):
     subprocess.run([str(c) for c in cmd], cwd=cwd, env=env, check=True)
 
 
+# Where a build happens, whatever checkout it was asked to build and wherever that sits.
+#
+# Cargo hashes a path dependency that lies outside its workspace root into the crate ids by absolute
+# path, and nife's `c_library` is a workspace of its own with dependencies in `../crates`. The ids
+# set the order of the program's functions, so building from a checkout at another path gave
+# another program (measured on nife milestone 917). Trimming paths does not reach that hash, so the
+# build runs at one fixed path instead: nife is staged here from its commit, and so is the
+# recipes' scratch space. `/tmp` is a symbolic link on macOS, where the physical path differs, so
+# a package rebuilt there is not expected to match one built on Linux.
+BUILD_ROOT = pathlib.Path("/tmp/basalt-build")
+
+
+def stage_nife(checkout):
+    """The tree of `checkout`'s HEAD, exported to BUILD_ROOT/nife, and that path."""
+    staged = BUILD_ROOT / "nife"
+    shutil.rmtree(BUILD_ROOT, ignore_errors=True)
+    staged.mkdir(parents=True)
+    archive = subprocess.run(
+        ["git", "archive", "HEAD"], cwd=checkout, check=True, capture_output=True
+    ).stdout
+    subprocess.run(["tar", "-x", "-C", staged], input=archive, check=True)
+    return staged
+
+
+# Cargo remaps the workspace, the registry and the toolchain's sources itself, and keeps the
+# rewrite out of the flags it hashes. A `--remap-path-prefix` in RUSTFLAGS would carry this
+# machine's paths into every crate's id (measured on nife milestone 917: the ids of `c_library` and
+# `c_program` moved with the checkout path, and with them the order of the program's functions).
+TRIM_PATHS = {"CARGO_UNSTABLE_TRIM_PATHS": "true", "CARGO_PROFILE_RELEASE_TRIM_PATHS": "all"}
+
+
 def build_ripgrep_shape(recipe, nife, work, triples):
     """The crate, its one patched dependency, built for each triple.
 
@@ -291,7 +346,12 @@ def build_ripgrep_shape(recipe, nife, work, triples):
     src = work / f"{name}-{version}"
     config = []
     for patch in recipe.get("patch", []):
-        dep = work / f"{patch['crate']}-{patch['version']}"
+        # Inside the crate's own directory, not beside it: cargo hashes a path dependency into the
+        # crate ids (and so into the program: type ids, say) by its absolute path unless it is under
+        # the workspace root, where it hashes the relative one. Beside the crate, the build's
+        # temporary directory would be in the program's bytes.
+        patched = src / "patched"
+        dep = patched / f"{patch['crate']}-{patch['version']}"
         patch_file = BASALT / patch["file"]
         if sha256(patch_file) != patch["file_sha256"]:
             fail(
@@ -301,7 +361,8 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         shutil.rmtree(dep, ignore_errors=True)
         dep_file = fetch_crate(patch["crate"], patch["version"], patch["sha256"], work)
         sources.append(dep_file)
-        unpack(dep_file, work)
+        patched.mkdir(exist_ok=True)
+        unpack(dep_file, patched)
         run(["patch", "-p1", "-s", "-i", patch_file], cwd=dep)
         config += ["--config", f'patch.crates-io.{patch["crate"]}.path="{dep}"']
         # The lock file names the registry copy; a patched path dependency carries no source or
@@ -327,7 +388,12 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         dest.mkdir(parents=True, exist_ok=True)
         note = dest / "note.o"
         run(["cargo", "xtask", "foreign-note", triple, note], cwd=nife)
-        env = dict(os.environ)
+        # The link inputs sit beside the crate and are named relative to it (cargo runs rustc, and
+        # rustc the linker, in the workspace root): an absolute path in RUSTFLAGS would be hashed
+        # into the crates' ids, see TRIM_PATHS.
+        shutil.copyfile(nife / "crates" / "user_mode_runtime" / "link.ld", src / "link.ld")
+        shutil.copyfile(note, src / "note.o")
+        env = dict(os.environ, **TRIM_PATHS)
         env.update(
             {
                 # nife's release profile carries overflow checks (its notes/overflow-checks.md).
@@ -335,10 +401,10 @@ def build_ripgrep_shape(recipe, nife, work, triples):
                 "RUSTUP_TOOLCHAIN": str(nife / "target" / "nife-farm"),
                 "RUSTFLAGS": " ".join(
                     [
-                        f"-Clink-arg=-T{nife}/crates/user_mode_runtime/link.ld",
+                        "-Clink-arg=-Tlink.ld",
                         "-Clink-arg=-u_start",
                         "-Clink-arg=--build-id=none",
-                        f"-Clink-arg={note}",
+                        "-Clink-arg=note.o",
                         # Symbols too, not only debug info, as nife strips every program it packs:
                         # a package may be at most 4 MiB (nife's spawnproto::IMAGE_MAX_PAGES).
                         # The manifest note is a PT_NOTE, which stripping keeps.
@@ -437,7 +503,10 @@ def build_c_shape(recipe, nife, work, triples):
             run([cc, *flags, *obj.get("cflags", []), "-c", src / obj["source"], "-o", o], cwd=src)
             objects.append(o)
         program = recipe["program"]
-        run([nife / "helpers" / "build-c-program.sh", program, triple, *objects], cwd=nife)
+        # The link builds the Rust standard library and the C program's runtime.
+        link_env = dict(os.environ, **TRIM_PATHS)
+        run([nife / "helpers" / "build-c-program.sh", program, triple, *objects], cwd=nife,
+            env=link_env)
         dest = nife / "target" / "basalt" / recipe["name"] / triple
         dest.mkdir(parents=True, exist_ok=True)
         elf = dest / program
@@ -464,8 +533,11 @@ def build_nife_shape(recipe, nife, work, triples):
     Returns ({triple: elf path}, [], [(doc member, path)]). The source is the nife commit itself,
     which `BUILT-FROM` names, so nothing is fetched, and the license files are read from that
     checkout."""
-    del work
     package, program = recipe["nife"]["package"], recipe["program"]
+    # Not RUSTFLAGS: it would replace the per-target `rustflags` of nife's .cargo/config.toml
+    # (x86_64-unknown-none carries some), which are part of how nife builds its own programs.
+    # trim-paths rewrites the workspace, the registry and the toolchain's sources instead.
+    env = dict(os.environ, **TRIM_PATHS)
     docs = license_docs(recipe, nife)
     sysroot = subprocess.run(
         ["rustc", "--print", "sysroot"], cwd=nife, check=True, capture_output=True, text=True
@@ -475,7 +547,7 @@ def build_nife_shape(recipe, nife, work, triples):
     for triple in triples:
         target = NATIVE_TARGETS[triple]
         run(["cargo", "build", "--release", "--locked", "-p", package, "--bin", program,
-             "--target", target], cwd=nife)
+             "--target", target], cwd=nife, env=env)
         dest = nife / "target" / "basalt" / recipe["name"] / triple
         dest.mkdir(parents=True, exist_ok=True)
         elf = dest / program
@@ -553,20 +625,36 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
         z.write(tar_bytes.getvalue())
 
 
-def build(nife, repository, triples):
-    check()
-    nife = nife.resolve()
+def rewrite_digests(path, digests):
+    """Replace (or append) the recipe's [package_digest] table with `digests`, {architecture: digest}.
+
+    The table is the file's last, so everything from its header on is the old one."""
+    text = path.read_text()
+    head = text.split(f"\n[{DIGEST_TABLE}]")[0].split("\n\n" + DIGEST_NOTE)[0].rstrip("\n")
+    table = "".join(f'{a} = "{digests[a]}"\n' for a in ARCHITECTURES)
+    path.write_text(
+        f"{head}\n\n{DIGEST_NOTE}[{DIGEST_TABLE}]\n{table}"
+    )
+
+
+def build(nife, repository, triples, only=(), update_digests=False):
+    check(digests_required=not update_digests)
+    checkout = nife.resolve()
+    nife = stage_nife(checkout)
     targets = repository / CHANNEL / "targets"
     metadata = repository / CHANNEL / "metadata"
     source_dir = repository / CHANNEL / "sources"
     for d in (targets, metadata, source_dir):
         d.mkdir(parents=True, exist_ok=True)
     lines = []
+    mismatches = []
     # Outside both checkouts: an unpacked crate with no [workspace] table finds the nearest
     # enclosing workspace and refuses to build inside it.
-    work = pathlib.Path(tempfile.gettempdir()) / "basalt-packages"
-    work.mkdir(exist_ok=True)
+    work = BUILD_ROOT / "work"
+    work.mkdir()
     for path in sorted((BASALT / "recipes").glob("*.toml")):
+        if only and path.stem not in only:
+            continue
         recipe = tomllib.loads(path.read_text())
         if "nife" in recipe:
             shape = build_nife_shape
@@ -575,16 +663,34 @@ def build(nife, repository, triples):
         else:
             shape = build_ripgrep_shape
         elfs, sources, docs = shape(recipe, nife, work, triples)
+        built = {}
         for triple, elf in elfs.items():
             stem, package = pack(recipe, nife, triple, elf, docs)
             shutil.copyfile(package, targets / f"{stem}.nifepkg")
-            lines.append(f"{stem} sha256:{sha256(package)}\n")
+            digest = f"sha256:{sha256(package)}"
+            lines.append(f"{stem} {digest}\n")
+            built[triple.split("-")[0]] = digest
+            want = recipe.get(DIGEST_TABLE, {}).get(triple.split("-")[0])
+            if want != digest and not update_digests:
+                mismatches.append(f"{stem}: built {digest}, {path.name} records {want}")
+        if update_digests:
+            if sorted(built) != sorted(ARCHITECTURES):
+                fail("--update-digests needs every architecture built; drop --triples")
+            rewrite_digests(path, built)
         archive = source_dir / f"{recipe['name']}-{recipe['version']}-source.tar.gz"
-        source_archive(recipe, path, sources, nife, archive)
+        source_archive(recipe, path, sources, checkout, archive)
         print(f"packages: {archive.name} sha256:{sha256(archive)}")
     (metadata / "stand-in-index").write_text("".join(lines))
     print(f"packages: {len(lines)} packages in {repository}")
     print("".join(lines), end="")
+    if mismatches:
+        for m in mismatches:
+            print(f"packages: {m}", file=sys.stderr)
+        fail(
+            "a package's bytes are not the recipe's recorded digest: either the build is not "
+            "reproducible here, or a reviewed change moved it (then `--update-digests` records "
+            "the new ones, and the diff is the review)"
+        )
 
 
 # nife's package_index::Location, which jig applies to every listed location: an optional root
@@ -650,6 +756,9 @@ def main():
     b.add_argument("nife", type=pathlib.Path)
     b.add_argument("repository", type=pathlib.Path)
     b.add_argument("--triples", nargs="+", default=TRIPLES)
+    b.add_argument("--update-digests", action="store_true",
+                   help="record the built packages' digests in their recipes instead of checking them")
+    b.add_argument("--only", nargs="+", default=[], help="build only these recipes (by file stem)")
     p = sub.add_parser("publish")
     p.add_argument("repository", type=pathlib.Path)
     p.add_argument("site", type=pathlib.Path)
@@ -659,7 +768,7 @@ def main():
     if args.verb == "check":
         check()
     elif args.verb == "build":
-        build(args.nife, args.repository.resolve(), args.triples)
+        build(args.nife, args.repository.resolve(), args.triples, args.only, args.update_digests)
     else:
         publish(args.repository.resolve(), args.site.resolve(), args.release)
 

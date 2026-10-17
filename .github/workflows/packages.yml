@@ -2,7 +2,7 @@
 # a booted nife installs them with `jig` (nife milestone 810, `ripgrep` is packaged in basalt and
 # installed with `jig`).
 #
-# Two jobs. `build` runs helpers/packages.py on the pinned nife commit: each recipe's source is
+# Four jobs. `build` runs helpers/packages.py on the pinned nife commit: each recipe's source is
 # fetched and refused unless its SHA-256 is the recipe's, built for the three nife targets with that
 # commit's toolchain, standard library and manifest note, and packed with that commit's own
 # `cargo xtask package`. The repository it writes (`rolling/metadata/stand-in-index` and
@@ -38,10 +38,37 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Two builds, on two runners, with two checkout paths, temporary directories, cargo homes and rustup homes: `primary` is
+  # the repository the next jobs install and publish, `independent` exists to be compared with it
+  # (nife milestone 917, basalt's packages build reproducibly). Each also refuses any package whose
+  # SHA-256 is not the one its recipe records, so a build that is not reproducible fails here
+  # before `reproduce` looks.
   build:
-    name: build the packages at nife's pin
+    # The primary leg keeps the name the repository's ruleset requires.
+    name: ${{ matrix.job }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
+    # The toolchain and registry directories differ between the legs too: a program built from them
+    # names them in its panic locations unless the build rewrites them.
+    env:
+      CARGO_HOME: ${{ matrix.cargo_home }}
+      RUSTUP_HOME: ${{ matrix.rustup_home }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: primary
+            job: "build the packages at nife's pin"
+            nife_path: nife
+            tmp: tmp-primary
+            cargo_home: /home/runner/.cargo
+            rustup_home: /home/runner/.rustup
+          - leg: independent
+            job: "rebuild the packages independently"
+            nife_path: independent/checkout/of/nife
+            tmp: tmp-independent
+            cargo_home: /home/runner/other-cargo
+            rustup_home: /home/runner/other-rustup
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
@@ -53,11 +80,11 @@ jobs:
         with:
           repository: ${{ steps.pin.outputs.slug }}
           ref: ${{ steps.pin.outputs.commit }}
-          path: nife
+          path: ${{ matrix.nife_path }}
           persist-credentials: false
 
       - name: Provision the toolchain the pinned commit names
-        working-directory: nife
+        working-directory: ${{ matrix.nife_path }}
         run: script/bootstrap
         env:
           NIFE_SKIP_LINT_TOOLS: "1"
@@ -69,20 +96,43 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang-19
 
       - name: Build the packages and the repository
-        run: helpers/packages.py build nife repository
+        run: |
+          mkdir -p "$TMPDIR"
+          helpers/packages.py build "${{ matrix.nife_path }}" repository
         env:
           NIFE_CC: clang-19
+          TMPDIR: ${{ runner.temp }}/${{ matrix.tmp }}
 
       - name: Keep the repository
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: repository
+          name: ${{ matrix.leg == 'primary' && 'repository' || 'repository-independent' }}
           retention-days: 14
           path: repository/
 
+  # The gate: the independent build's every file is the primary's, byte for byte.
+  reproduce:
+    name: the two builds are byte-identical
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: repository
+          path: primary
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: repository-independent
+          path: independent
+      - name: Compare
+        run: |
+          diff -r primary independent
+          echo "primary and independent hold the same $(find primary -type f | wc -l) files"
+
   install:
     name: jig installs them (${{ matrix.row }})
-    needs: build
+    needs: [build, reproduce]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -145,7 +195,7 @@ jobs:
 
   publish:
     name: publish the index to Pages and the packages to a Release
-    needs: [build, install]
+    needs: [build, reproduce, install]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 15

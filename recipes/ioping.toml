@@ -44,3 +44,10 @@ sha256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
 [[object]]
 source = "ioping.c"
 cflags = ["-O2", "-std=gnu99", "-DEXTRA_VERSION=\"\""]
+
+# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
+# --update-digests` rewrites this table after a reviewed change.
+[package_digest]
+aarch64 = "sha256:7c9417ec18cfebfbcb3fe98ca24495d594549aa8b6034a5f4f64be7b5e94ff47"
+riscv64 = "sha256:715784f7fa9af9633e6125d5e379a74e38a4bbb32b262ff0ed3d63018f3dad3e"
+x86_64 = "sha256:0f20ceb1c70600beb4cee0e06989461e4c3fc797d286e1224e2dabc499d23857"
