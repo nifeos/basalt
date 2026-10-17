@@ -624,7 +624,8 @@ def rewrite_digests(path, digests):
 
     The table is the file's last, so everything from its header on is the old one."""
     text = path.read_text()
-    head = text.split(f"\n[{DIGEST_TABLE}]")[0].split("\n\n" + DIGEST_NOTE)[0].rstrip("\n")
+    # The first split removes the newline that ends the note, so the note is matched without it.
+    head = text.split(f"\n[{DIGEST_TABLE}]")[0].split("\n\n" + DIGEST_NOTE.rstrip("\n"))[0].rstrip("\n")
     table = "".join(f'{a} = "{digests[a]}"\n' for a in ARCHITECTURES)
     path.write_text(
         f"{head}\n\n{DIGEST_NOTE}[{DIGEST_TABLE}]\n{table}"

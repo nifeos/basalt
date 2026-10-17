@@ -18,9 +18,19 @@
 # requests" is on. The branch is pushed and the gate started before that step, so the evidence
 # exists either way; the run then fails and says which setting it needed.
 #
+# **The bump carries the new digests.** A moved pin moves the packages, and a recipe records each
+# package's SHA-256 (nife milestone 917), so after rewriting the pin the job builds the packages at
+# the new commit with `helpers/packages.py build --update-digests` and commits the changed
+# `[package_digest]` lines in the same pull request (calef, 2026-10-17 UTC, asked whether the bot
+# should regenerate digests in its own pull request: "Yes"). The `packages` workflow then builds
+# the bump twice and its `reproduce` job fails unless the two builds are byte-identical, so a digest
+# the bot wrote is checked by an independent build, and a reviewer reads the digest lines in the
+# diff. The job runs on the arm64 pool, where `packages` builds.
+#
 # On a pull request that touches this file or helpers/pins.py, the job runs as a dry run: it reads
-# nife's main, rewrites the pin in its own checkout and prints the diff, and pushes nothing. That is
-# this workflow's own test.
+# nife's main, rewrites the pin and the digests in its own checkout and prints the diff, and pushes
+# nothing. That is this workflow's own test, though it proves only that the build runs and rewrites
+# the tables: that the digests reproduce is proven by `packages` on the first real bump.
 #
 # Names provisional: the file, the workflow, the job and the branch `pin/nife`.
 name: pin bump
@@ -51,8 +61,8 @@ permissions:
 jobs:
   propose:
     name: propose a nife pin bump
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
     env:
       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
       DRY_RUN: ${{ github.event_name == 'pull_request' }}
@@ -82,9 +92,12 @@ jobs:
             target="$(git ls-remote "$pin_repository" refs/heads/main | cut -f1)"
           fi
           [ -n "$target" ] || { echo "could not read main's head from $pin_repository" >&2; exit 1; }
-          echo "current=$pin_commit" >> "$GITHUB_OUTPUT"
-          echo "target=$target" >> "$GITHUB_OUTPUT"
-          echo "repository=$pin_repository" >> "$GITHUB_OUTPUT"
+          {
+            echo "current=$pin_commit"
+            echo "target=$target"
+            echo "repository=$pin_repository"
+            echo "slug=$pin_slug"
+          } >> "$GITHUB_OUTPUT"
           if [ "$pin_commit" = "$target" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "nife is already pinned at $target; nothing to propose."
@@ -100,7 +113,37 @@ jobs:
         run: |
           helpers/pins.py set nife "$TARGET"
           helpers/pins.py get nife
+
+      - name: Check out nife at the new pin
+        if: steps.plan.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ steps.plan.outputs.slug }}
+          ref: ${{ steps.plan.outputs.target }}
+          path: nife
+          persist-credentials: false
+
+      - name: Provision the toolchain the new pin names
+        if: steps.plan.outputs.skip == 'false'
+        working-directory: nife
+        run: script/bootstrap
+        env:
+          NIFE_SKIP_LINT_TOOLS: "1"
+
+      - name: Install clang 19 for the C recipes
+        if: steps.plan.outputs.skip == 'false'
+        run: sudo apt-get update && sudo apt-get install -y clang-19
+
+      # The same command `packages` runs, plus the flag that records what it built. It must run
+      # from a clean tree apart from pins.toml, since the rewritten recipes are what gets committed.
+      - name: Record the new packages' digests
+        if: steps.plan.outputs.skip == 'false'
+        run: |
+          helpers/packages.py build nife repository --update-digests
+          git diff --stat
           git diff
+        env:
+          NIFE_CC: clang-19
 
       - name: Push the branch, start the gate, open or update the pull request
         if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
@@ -118,23 +161,31 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add pins.toml
+          git add pins.toml recipes
           git commit -m "pin nife at $short_target
 
           Moves the nife pin from $CURRENT
-          to $TARGET, proposed by the scheduled pin bump.
+          to $TARGET, proposed by the scheduled pin bump, and records
+          the digests of the packages built there (helpers/packages.py
+          build --update-digests).
           What changed in nife: $REPOSITORY/compare/$CURRENT...$TARGET"
           git push --force origin "$branch"
 
           if [ -z "$APP_TOKEN" ]; then
             gh workflow run gate.yml --ref "$branch"
-            echo "Started the gate on $branch (a github.token push starts no workflow by itself)."
+            gh workflow run packages.yml --ref "$branch"
+            echo "Started the gate and packages on $branch (a github.token push starts no workflow by itself)."
           fi
 
           title="pin nife at $short_target"
           body="**Lane:** $branch, opened by the scheduled pin-bump workflow.
 
           Moves nife from \`$short_current\` to \`$short_target\`: [what changed]($REPOSITORY/compare/$CURRENT...$TARGET).
+
+          The \`[package_digest]\` lines in \`recipes/\` are the SHA-256 of each package built at the new
+          pin, written by \`helpers/packages.py build --update-digests\` (calef, 2026-10-17 UTC). Read them
+          in the diff: an unchanged line means that package did not move. \`packages\` rebuilds twice on
+          independent paths and its \`reproduce\` job fails unless the two are byte-identical.
 
           The gate check on this pull request is nife's own image build and system test, run at the new
           pin on aarch64, riscv64 and x86_64. Green means the pin is safe to take. Red means nife's main
