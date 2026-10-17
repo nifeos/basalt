@@ -55,3 +55,10 @@ cflags = [
     "-O2", "-DSQLITE_THREADSAFE=0", "-DSQLITE_OMIT_LOAD_EXTENSION",
     "-Isqlite-amalgamation-3500400",
 ]
+
+# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
+# --update-digests` rewrites this table after a reviewed change.
+[package_digest]
+aarch64 = "sha256:f8680d5d042532b37936ab5e908002eb547e43fec2644d40a04d9010ce853537"
+riscv64 = "sha256:d92d039c38657d2cbe990be9b25d234abbe30958dc88aaee9a9beec729712085"
+x86_64 = "sha256:5218b6b52f41d1a87528e8a0b44e04352eff9fde4a684d438bf8260fb7cfc4d4"

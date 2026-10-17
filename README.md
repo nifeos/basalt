@@ -170,9 +170,17 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 - **A Release is never pruned.** Pages carries only the newest build; old versions stay reachable
   on their Releases. GitHub's documented limits (Pages: a 1 GB site and a soft 100 GB a month;
   Releases: 2 GiB an asset) are recalled, not measured here.
-- **A recipe records the source's digest, not the package's.** Recording the package's needs the
-  build to be reproducible across machines, which nobody has measured; the index carries the
-  digest of what this run built.
+- **Packages build reproducibly, and a recipe records each package's digest.** A recipe's
+  `[package_digest]` table holds one SHA-256 per architecture, and `helpers/packages.py build`
+  refuses a package that hashes to anything else. The `packages` workflow builds twice, on two
+  runners with different checkout, temporary, cargo and rustup paths, and its `reproduce` job fails
+  unless the two repositories are byte-identical. A change that moves a package (a recipe, a patch,
+  `helpers/packages.py`, or the nife pin) is merged with `helpers/packages.py build <nife> <dir>
+  --update-digests`, whose diff is what a reviewer reads. The build runs at one fixed path
+  (`/tmp/basalt-build`) because cargo hashes path dependencies outside a workspace into crate
+  ids, which orders the program's functions; on macOS `/tmp` is a link, so a package rebuilt there
+  does not match one built on Linux. The pin-bump workflow does not refresh digests, so a bump
+  pull request is red until someone runs `--update-digests`.
 - **A package's notices stop at its upstream project and its crates.** The standard library and
   nife's C library linked into every program are MIT OR Apache-2.0 (the C library MIT), and their
   notices are not in the package yet.

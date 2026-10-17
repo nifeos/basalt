@@ -13,8 +13,9 @@
 # - The toolchain, the target specs, the standard library and the manifest note all come from the
 #   nife commit pins.toml names, as the gate's build does.
 #
-# The package digest is not recorded here yet: that needs the build to be reproducible across
-# machines, which nobody has measured. The index carries the digest of what this build produced.
+# The package digest is recorded per architecture in `[package_digest]`, and every build refuses a
+# package that does not hash to it: the build is reproducible across machines (README.md, "Packages
+# build reproducibly"), so a reviewer can rebuild and compare.
 #
 # Every key and the file's layout are provisional.
 
@@ -39,3 +40,10 @@ sha256 = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
 # A path in this repository, and the SHA-256 of the file there.
 file = "patches/ripgrep-ignore-walk.patch"
 file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
+
+# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
+# --update-digests` rewrites this table after a reviewed change.
+[package_digest]
+aarch64 = "sha256:693e0b7c5a7abea333702c57a14b460a60b8194f76dd3a5d442650e892d28fcb"
+riscv64 = "sha256:4c661958354d0e7a8c2230863024a56f8f98b45aa58decae7a7bbd9e88da59b9"
+x86_64 = "sha256:a38938cd94859c7922a894c6a3c1bd654c759adbb788f522837edf3cd38b5cb4"

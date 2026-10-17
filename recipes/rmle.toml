@@ -20,3 +20,10 @@ license_files = ["LICENSE-MIT", "LICENSE-APACHE"]
 
 [nife]
 package = "components"
+
+# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
+# --update-digests` rewrites this table after a reviewed change.
+[package_digest]
+aarch64 = "sha256:78e4a30c90b67ff3fc8dc23fdc25237ab1b0b2c0771192ab5fd419ff2d0818ba"
+riscv64 = "sha256:a4cc65067277baaaa4b71f26c6aab46a5a9d621a193f6b5a1cc810e25e494ea4"
+x86_64 = "sha256:8a9ef5e22cab3ef4c091da79db7bd7f454e9b3160c826f9e1625e459ceb9f0c9"
