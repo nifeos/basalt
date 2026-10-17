@@ -179,8 +179,10 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   --update-digests`, whose diff is what a reviewer reads. The build runs at one fixed path
   (`/tmp/basalt-build`) because cargo hashes path dependencies outside a workspace into crate
   ids, which orders the program's functions; on macOS `/tmp` is a link, so a package rebuilt there
-  does not match one built on Linux. The pin-bump workflow does not refresh digests, so a bump
-  pull request is red until someone runs `--update-digests`.
+  does not match one built on Linux. The pin-bump workflow runs `--update-digests` after it moves
+  the pin and commits the changed `[package_digest]` lines in the bump pull request (calef,
+  2026-10-17 UTC), so a reviewer reads them in that diff. That the bot's digests reproduce is first
+  proven on a real bump, by `packages` building it twice.
 - **A package's notices stop at its upstream project and its crates.** The standard library and
   nife's C library linked into every program are MIT OR Apache-2.0 (the C library MIT), and their
   notices are not in the package yet.
