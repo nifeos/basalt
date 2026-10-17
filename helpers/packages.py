@@ -399,18 +399,12 @@ def build_ripgrep_shape(recipe, nife, work, triples):
                 # nife's release profile carries overflow checks (its notes/overflow-checks.md).
                 "CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS": "true",
                 "RUSTUP_TOOLCHAIN": str(nife / "target" / "nife-farm"),
-                "RUSTFLAGS": " ".join(
-                    [
-                        "-Clink-arg=-Tlink.ld",
-                        "-Clink-arg=-u_start",
-                        "-Clink-arg=--build-id=none",
-                        "-Clink-arg=note.o",
-                        # Symbols too, not only debug info, as nife strips every program it packs:
-                        # a package may be at most 4 MiB (nife's spawnproto::IMAGE_MAX_PAGES).
-                        # The manifest note is a PT_NOTE, which stripping keeps.
-                        "-Cstrip=symbols",
-                        "-Copt-level=s",
-                    ]
+                # Symbols too, not only debug info, as nife strips every program it packs: a package
+                # may be at most 4 MiB (nife's spawnproto::IMAGE_MAX_PAGES). The manifest note is a
+                # PT_NOTE, which stripping keeps.
+                "RUSTFLAGS": (
+                    "-Clink-arg=-Tlink.ld -Clink-arg=-u_start -Clink-arg=--build-id=none "
+                    "-Clink-arg=note.o -Cstrip=symbols -Copt-level=s"
                 ),
             }
         )
