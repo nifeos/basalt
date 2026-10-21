@@ -49,6 +49,6 @@ cflags = ["-O2", "-D_GNU_SOURCE", "-DVERSION=2.11", "-Wno-incompatible-pointer-t
 # Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
-aarch64 = "sha256:ebfa5c9376dbda13e1bd0541f71f742c73d2aa140c895aaecbe863ea28c17df4"
-riscv64 = "sha256:22a777daf01746bfaa9c0378fa4cff8c294f541d463a19a1b566d73f702062ce"
-x86_64 = "sha256:9637b5b507ca13419130a7bf5988a9fd716f2dbbf87d4a2d132070d4b5b05507"
+aarch64 = "sha256:f931eec22116f347ee33c93dce6a9f49382b90737d4f8025616844bad2f432f4"
+riscv64 = "sha256:21497b9e0bacdee594ffca3219a244addf711ea64e4e9573023a42180b329ad8"
+x86_64 = "sha256:5d89169cabfaa1f86b2cea0dc85a41ba71769fdb18fc704b3e126936e0cd79a2"
