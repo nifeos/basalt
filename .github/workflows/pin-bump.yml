@@ -1,10 +1,27 @@
 # pin bump: propose moving each pin in pins.toml to its component's newest main commit.
 #
 # A proposal, not a push. The bump lands as a pull request on the branch `pin/nife`, force-pushed on
-# each run so there is only ever one open, and the gate runs on it like on any other pull request. A
-# person (or, later, a merge queue) merges it. That keeps every pin change reviewable and revertible
-# as one commit, and it means a nife commit that breaks basalt's gate is a red pull request rather
-# than a red main.
+# each run so there is only ever one open, and the gate runs on it like on any other pull request.
+# The pull request arms auto-merge on itself (below), so it merges once the required checks pass.
+# That keeps every pin change reviewable and revertible as one commit, and it means a nife commit
+# that breaks basalt's gate is a red pull request rather than a red main.
+#
+# **Auto-merge, and why the gate is enough.** calef approved this on 2026-10-21 (UTC) to save a
+# daily click. The required checks are the review: nife's own system test at the new pin on
+# aarch64, riscv64 and x86_64, the `packages` builds that must come out byte-identical twice, and
+# the jig installs. A merge to main publishes the index to Pages and the packages to a Release, so
+# the run arms only a pull request it can vouch for, and only when all of these hold:
+#   - the run is on main, and the pull request is `pin/nife` in this repository, opened by the
+#     automation App (`nife-smelter[bot]`), with the head this run pushed (`--match-head-commit`);
+#   - the diff touches only pins.toml and the `[package_digest]` lines of existing recipes
+#     (`helpers/pins.py only-bump`).
+# Otherwise it disarms the pull request and says why in its body and the run's summary. The App
+# token matters twice: it is what lets the pull request run the gate by itself, and a merge armed by
+# the App is pushed by the App, which starts `packages`; one armed with `github.token` would not.
+# The branch is force-pushed, so every run arms again. There is no hold label: holding a nife change
+# back is rare and there are no customers yet. To hold one, `gh pr merge pin/nife --disable-auto`;
+# that lasts until the next run (daily at 06:17 UTC) arms the new head, so to hold longer also
+# `gh workflow disable pin-bump.yml`. Dependabot's pull requests are not touched here.
 #
 # **Which identity, and why it matters.** GitHub does not start workflows for a push or a pull
 # request made with the job's own `github.token`. So when the run has only that token, it starts the
@@ -30,7 +47,9 @@
 # On a pull request that touches this file or helpers/pins.py, the job runs as a dry run: it reads
 # nife's main, rewrites the pin and the digests in its own checkout and prints the diff, and pushes
 # nothing. That is this workflow's own test, though it proves only that the build runs and rewrites
-# the tables: that the digests reproduce is proven by `packages` on the first real bump.
+# the tables: that the digests reproduce is proven by `packages` on the first real bump. The dry run
+# also commits the bump locally and checks that `only-bump` accepts it and refuses each fake diff it
+# must refuse. The identity checks need a real pull request, and are proven by the first real run.
 #
 # Names provisional: the file, the workflow, the job and the branch `pin/nife`.
 name: pin bump
@@ -145,7 +164,38 @@ jobs:
         env:
           NIFE_CC: clang-19
 
+      # The dry run's test of `only-bump`: the real bump (empty when there is none) must pass, and
+      # each fake diff below must be refused. Nothing here is pushed.
+      - name: Check the auto-merge guard against the bump and fake diffs
+        if: env.DRY_RUN == 'true'
+        run: |
+          set -e
+          commit() { git -c user.name=dry-run -c user.email=dry-run@invalid commit -q --allow-empty -m "$1"; }
+          git add pins.toml recipes
+          commit "dry-run bump"
+          helpers/pins.py only-bump HEAD^ HEAD
+          echo "accepted: the bump"
+          refuse() {
+            git add -A README.md recipes
+            commit "$1"
+            if helpers/pins.py only-bump HEAD^ HEAD; then
+              echo "::error::only-bump accepted a diff it must refuse: $1"
+              exit 1
+            fi
+            echo "refused, as it must be: $1"
+            git reset -q --hard HEAD^
+          }
+          echo dry-run >> README.md
+          refuse "a file other than pins.toml or a recipe"
+          sed -i '1i # dry-run' recipes/ripgrep.toml
+          refuse "a recipe line outside [package_digest]"
+          sed -i '/^\[package_digest\]$/a extra = "dry-run"' recipes/ripgrep.toml
+          refuse "a line in [package_digest] that is not a digest"
+          cp recipes/ripgrep.toml recipes/dry-run.toml
+          refuse "a new recipe"
+
       - name: Push the branch, start the gate, open or update the pull request
+        id: push
         if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
@@ -192,6 +242,7 @@ jobs:
           moved to a commit that fails its own system test here; do not merge, and look at the gate's log.
 
           This branch is force-pushed on every scheduled run, so it always proposes main's newest head."
+          printf '%s\n' "$body" > "$RUNNER_TEMP/body.md"
 
           existing="$(gh pr list --head "$branch" --state open --json number --jq '.[].number')"
           if [ -n "$existing" ]; then
@@ -203,3 +254,47 @@ jobs:
                  "The branch $branch is pushed and the gate is running on it."
             exit 1
           fi
+          {
+            echo "pr=$(gh pr list --head "$branch" --state open --json number --jq '.[].number')"
+            echo "head=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The conditions and the reason are in the header. A refusal is not a failed run: the pull
+      # request stays open for a person, and its body says why.
+      - name: Arm auto-merge, or say why not
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          PR: ${{ steps.push.outputs.pr }}
+          PUSHED: ${{ steps.push.outputs.head }}
+        run: |
+          set -e
+          refusals=()
+          [ "$GITHUB_REF" = refs/heads/main ] || refusals+=("this run is on $GITHUB_REF, not main")
+          IFS=$'\t' read -r login ref repo head < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+            --jq '[.user.login, .head.ref, .head.repo.full_name, .head.sha] | @tsv')
+          [ "$login" = "nife-smelter[bot]" ] || refusals+=("it was opened by $login, not nife-smelter[bot]")
+          [ "$ref" = pin/nife ] && [ "$repo" = "$GITHUB_REPOSITORY" ] \
+            || refusals+=("its head is $repo:$ref, not $GITHUB_REPOSITORY:pin/nife")
+          [ "$head" = "$PUSHED" ] || refusals+=("its head is $head, not $PUSHED, which this run pushed")
+          if ! diff="$(helpers/pins.py only-bump HEAD^ HEAD)"; then
+            while IFS= read -r line; do refusals+=("$line"); done <<< "$diff"
+          fi
+
+          if [ ${#refusals[@]} -eq 0 ]; then
+            gh pr merge "$PR" --auto --merge --match-head-commit "$PUSHED"
+            note="**Auto-merge is armed** for \`$(printf %.9s "$PUSHED")\`: this pull request merges once the
+          required checks pass, and the merge publishes to Pages and a Release. To hold it, run
+          \`gh pr merge pin/nife --disable-auto\`; the next scheduled run arms its new head again."
+            echo "Armed auto-merge on #$PR at $PUSHED." >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr merge "$PR" --disable-auto 2>/dev/null || true
+            reasons="$(printf -- '- %s\n' "${refusals[@]}")"
+            note="**Auto-merge is not armed.** This pull request needs a person, because:
+          $reasons"
+            printf 'Did not arm auto-merge on #%s:\n%s\n' "$PR" "$reasons" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Did not arm auto-merge on #$PR; see the summary."
+          fi
+          gh pr edit "$PR" --body "$(cat "$RUNNER_TEMP/body.md")
+
+          $note"
