@@ -88,6 +88,7 @@ own site from `nifeos/nifeos.github.io`.
 |---|---|---|
 | The index, `rolling/metadata/stand-in-index` | GitHub Pages, the project site of this repository, at its own custom domain `https://basalt.nifeos.org/` | Every nife image names this host and pins its TLS to ISRG Root X1 (nife §250); Pages certificates are Let's Encrypt and chain to X1 |
 | The packages, `<stem>.nifepkg` | One GitHub Release per publish, tagged `rolling-<UTC date of the commit>-<short commit>` (provisional) | Each asset's `download_count` is the first adoption signal, per package, version and architecture (nife milestone 576). Nothing identifies a system |
+| The index's second address, `https://basalt.crickertech.com/` | A second Pages site, of `nifeos/basalt-backup`'s `pages` branch, which `publish`'s `backup` job replaces with the same files each time | nife §250 clause 6: a second registrable domain, tried when the first stops answering (calef, 2026-10-21 UTC: *"P1: a second Pages site in nifeos for basalt.crickertech.com"*). Pages serves one custom domain per site. It still shares Pages, the organization, this workflow and NS1 with the first |
 | basalt's own copy of the packages, `rolling/targets/` | The same Pages site | nife §250's amendment of 2026-10-10, clause 9: basalt always keeps a copy under its own `targets/`, tried last. The fallback when the Release cannot be reached, which is not counted |
 
 Each index line names its package's Release asset as a listed location, with the root its
@@ -121,6 +122,30 @@ The `publish` job refuses to run until step 3 is done, and says what is missing.
 5. Check the chain an image will see:
    `openssl s_client -connect basalt.nifeos.org:443 -servername basalt.nifeos.org </dev/null | grep 'i:'`
    ends at `ISRG Root X1`.
+
+## What calef must do for the second address
+
+The `backup` job fails, without holding back `basalt.nifeos.org`, until steps 1 and 2 are done.
+
+1. Give the job its key, so nothing else can push to the second site (run anywhere with `gh`
+   signed in as an organization owner):
+   `ssh-keygen -t ed25519 -N '' -C 'basalt backup' -f backup_key`, then
+   `gh repo deploy-key add backup_key.pub --repo nifeos/basalt-backup --allow-write --title 'basalt publish'`,
+   then `gh secret set BACKUP_DEPLOY_KEY --repo nifeos/basalt < backup_key`, then
+   `rm backup_key backup_key.pub`.
+2. Run `packages` on `main` (`gh workflow run packages.yml --repo nifeos/basalt`). `backup` creates
+   the `pages` branch of `nifeos/basalt-backup`, with a `CNAME` naming `basalt.crickertech.com`.
+3. Recommended before the DNS record, so nobody else can claim the name: verify `crickertech.com`
+   for the organization (organization Settings, Pages, "Add a domain"; one TXT record,
+   `_github-pages-challenge-nifeos.crickertech.com`).
+4. In the zone for `crickertech.com` (GoDaddy's registration, NS1's name servers), add
+   `basalt CNAME nifeos.github.io.` and nothing else for that name.
+5. In `nifeos/basalt-backup`'s Settings, Pages: Source "Deploy from a branch", branch `pages`, folder
+   `/`; Custom domain `basalt.crickertech.com`; once the certificate is issued, tick "Enforce HTTPS".
+6. Check what an image will see: `curl -sS -o /dev/null -w '%{http_code}\n'
+   https://basalt.crickertech.com/rolling/metadata/stand-in-index` prints `200`, and
+   `openssl s_client -connect basalt.crickertech.com:443 -servername basalt.crickertech.com
+   -showcerts </dev/null | grep 'i:'` ends at `ISRG Root X1`.
 
 basalt has no toolchain of its own. It builds each component at the toolchain pin that component's
 commit carries.

@@ -31,8 +31,8 @@ name `rolling` is provisional, as nife's `package_index::PROVISIONAL_CHANNEL` is
 
 `publish` turns a built repository into what is served (calef, 2026-10-12 UTC: "Packages on
 Releases, index on Pages"). It writes <site-dir>, the GitHub Pages site behind basalt.nifeos.org,
-with the index's every line given one listed location, the package's asset on the GitHub Release
-whose download URL prefix is --release:
+which the workflow copies to basalt.crickertech.com, with the index's every line given one listed
+location, the package's asset on the GitHub Release whose download URL prefix is --release:
 
     <site-dir>/rolling/metadata/stand-in-index   `<stem> sha256:<hex> sectigo-root-e46=<release>/<stem>.nifepkg`
     <site-dir>/rolling/targets/<stem>.nifepkg     basalt's own copy, which nife's jig tries last
