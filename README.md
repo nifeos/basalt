@@ -3,10 +3,11 @@
 The first-party distribution of [nife](https://github.com/nifeos/nife).
 
 The naming convention, so nobody has to ask: the kernel is named for the core (`nife`, Suess's
-nickel-iron), distributions are named for rocks, and programs for minerals. A rock is an
-aggregate of minerals the way a distribution is an aggregate of programs. There are hundreds of
-named rocks, so naming your own distribution requires no permission and no coordination with
-this project; only `basalt` is reserved.
+nickel-iron), distributions are named for rocks, and a mineral is simply the fitting name for a
+program of this OS. Programs do not need to be named minerals; that is the convention, not a
+requirement (calef, 2026-10-28 UTC). A rock is an aggregate of minerals the way a distribution
+is an aggregate of programs. There are hundreds of named rocks, so naming your own distribution
+requires no permission and no coordination with this project; only `basalt` is reserved.
 
 What a distribution actually packages is an open question, recorded in the nife tree
 ([`design/what-a-distribution-packages.md`](https://github.com/nifeos/nife/blob/main/design/what-a-distribution-packages.md)).
