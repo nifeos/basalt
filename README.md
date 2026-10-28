@@ -33,7 +33,7 @@ does not know basalt exists.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
-  either (`helpers/packages.py check`). Today there are six.
+  either (`helpers/packages.py check`). Today there are seven.
   [`ripgrep`](recipes/ripgrep.toml) names the crate and its one patched dependency, each pinned by
   SHA-256, and the program it installs as (`rg`). [`ioping`](recipes/ioping.toml) and
   [`hackbench`](recipes/hackbench.toml) each name one C file pinned by SHA-256 and the flags it is
@@ -41,7 +41,12 @@ does not know basalt exists.
   SQLite's amalgamation zip, unpacked after its digest is checked, and `speedtest1.c` beside it.
   [`rmle`](recipes/rmle.toml) is the first first-party package: a `[[bin]]` of the pinned nife's
   own workspace, built at that commit, with nothing fetched. [`demos`](recipes/demos.toml) is
-  the second, carrying `least_authority_demo`.
+  the second, carrying `least_authority_demo`. [`base`](recipes/base.toml) is the base image's
+  set, which is every package the image carries; it names no program, because the membership is
+  nife's own `packages/<name>.package.toml` files and the image's list is nife's
+  `packages/base-image.toml`. `helpers/packages.py base <nife> <repository>` builds it with the
+  pinned checkout's own `cargo xtask base-packages`, and `cargo xtask base-image` composes the
+  kernel and initial ramdisk from those packages.
 - [`patches/`](patches/) holds the patches a recipe applies to its sources, each named in the
   recipe with its SHA-256. Today that is `ripgrep-ignore-walk.patch`, for `ignore`'s parallel
   walker on nife.
