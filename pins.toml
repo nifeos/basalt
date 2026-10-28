@@ -6,7 +6,9 @@
 # toolchain and runs that commit's own system test. The pin-bump workflow proposes a new commit as a
 # pull request.
 #
-# The file name, the format and the key names are provisional.
+# The file name, the format and the key names are ratified: `pins.toml`, one table per component,
+# the keys `repository` and `commit` (calef, 2026-10-28 UTC, in the maintainer's session, relayed
+# by the maintainer). They are no longer provisional.
 
 [nife]
 repository = "https://github.com/nifeos/nife"

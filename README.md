@@ -150,8 +150,9 @@ The `backup` job fails, without holding back `basalt.nifeos.org`, until steps 1 
 basalt has no toolchain of its own. It builds each component at the toolchain pin that component's
 commit carries.
 
-Every name here (the manifest's file name, its keys, the workflows, the branch `pin/nife`, the
-Release tags) is provisional.
+Every name here is provisional except the ones calef ratified on 2026-10-28 (UTC): the manifest's
+file name, its format and its key names. The workflows, the branch `pin/nife` and the Release
+tags are still provisional.
 
 Contributing, the gates and reporting a bad package: [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md). Agents start at [AGENTS.md](AGENTS.md).
