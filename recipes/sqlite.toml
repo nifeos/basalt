@@ -59,6 +59,6 @@ cflags = [
 # Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
-aarch64 = "sha256:23ad33e1125f3dc404fe4cedc13bbf54091b14e5802d97abee95997c9b19c325"
-riscv64 = "sha256:370b78e336b690942339a551347f3adda2d732e67c48354e82e7e98553076b09"
-x86_64 = "sha256:1eede8552c4c95f19a8ab573746f624e9379191ed0bcaddd0e8c84d7052cf3cb"
+aarch64 = "sha256:ab5adcfb39e2feef6b542d7143f20c57a651eae3909604e7b91342f317aed01a"
+riscv64 = "sha256:d3ca14cba90e8ae374f087787df45b4e2a4b184ac35673945a7888f3169fcf3e"
+x86_64 = "sha256:5f94f2ac261c7e9ddf1149ee24a47d5128a98c2dea3bb042b08462f7c9b01501"
