@@ -165,15 +165,22 @@ def check_recipe(path, digests_required=True):
     """The recipe's problems, as messages; empty when it may be built."""
     recipe = tomllib.loads(path.read_text())
     problems = []
-    recorded = recipe.get(DIGEST_TABLE)
-    if recorded is None:
-        if digests_required:
-            problems.append(f"has no [{DIGEST_TABLE}] table (run `helpers/packages.py build --update-digests`)")
-    elif not isinstance(recorded, dict) or sorted(recorded) != sorted(ARCHITECTURES) or not all(
-        isinstance(v, str) and DIGEST.fullmatch(v) for v in recorded.values()
-    ):
-        problems.append(f"[{DIGEST_TABLE}] must hold one `sha256:<64 hex digits>` per architecture: "
-                        + ", ".join(ARCHITECTURES))
+    if "base" in recipe:
+        # The base's digests are the repository's index lines, one per package per architecture,
+        # not one package's table; recipes/base.toml says why.
+        base = recipe["base"]
+        if not isinstance(base, dict) or not isinstance(base.get("image"), str) or not base["image"].strip():
+            problems.append("[base] must name the image definition (`image = \"packages/base-image.toml\"`)")
+    else:
+        recorded = recipe.get(DIGEST_TABLE)
+        if recorded is None:
+            if digests_required:
+                problems.append(f"has no [{DIGEST_TABLE}] table (run `helpers/packages.py build --update-digests`)")
+        elif not isinstance(recorded, dict) or sorted(recorded) != sorted(ARCHITECTURES) or not all(
+            isinstance(v, str) and DIGEST.fullmatch(v) for v in recorded.values()
+        ):
+            problems.append(f"[{DIGEST_TABLE}] must hold one `sha256:<64 hex digits>` per architecture: "
+                            + ", ".join(ARCHITECTURES))
     license = recipe.get("license")
     if not isinstance(license, str) or not license.strip():
         problems.append("names no `license` (an SPDX expression)")
@@ -572,6 +579,23 @@ def pack(recipe, nife, triple, elf, docs):
     return stem, nife / "target" / "packages" / f"{stem}.nifepkg"
 
 
+def write_source_tarball(top, members, dest):
+    """Write `members` (`[(member name, bytes)]`) under `<top>/` as one reproducible .tar.gz.
+
+    Sorted members, fixed mode, times and owners, so a rerun of the same commit makes the same
+    archive; two builds of one package can then be compared byte for byte."""
+    tar_bytes = io.BytesIO()
+    with tarfile.open(fileobj=tar_bytes, mode="w", format=tarfile.PAX_FORMAT) as t:
+        for name, data in sorted(members):
+            info = tarfile.TarInfo(f"{top}/{name}")
+            info.size, info.mode, info.mtime = len(data), 0o644, 0
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            t.addfile(info, io.BytesIO(data))
+    with open(dest, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", filename="", mtime=0) as z:
+        z.write(tar_bytes.getvalue())
+
+
 def source_archive(recipe, recipe_path, sources, nife, dest):
     """The package's corresponding source as one reproducible .tar.gz at `dest`.
 
@@ -607,16 +631,119 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
         ("pins.toml", (BASALT / "pins.toml").read_bytes()),
         ("BUILT-FROM", note.encode()),
     ]
-    tar_bytes = io.BytesIO()
-    with tarfile.open(fileobj=tar_bytes, mode="w", format=tarfile.PAX_FORMAT) as t:
-        for name, data in sorted(members):
-            info = tarfile.TarInfo(f"{top}/{name}")
-            info.size, info.mode, info.mtime = len(data), 0o644, 0
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            t.addfile(info, io.BytesIO(data))
-    with open(dest, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", filename="", mtime=0) as z:
-        z.write(tar_bytes.getvalue())
+    write_source_tarball(top, members, dest)
+
+
+def read_base_image(nife, recipe):
+    """The pinned checkout's image definition, and the package that owns each program in it."""
+    image_path = nife / recipe["base"]["image"]
+    image = tomllib.loads(image_path.read_text())
+    owners = {}
+    for path in sorted((nife / "packages").glob("*.package.toml")):
+        package = tomllib.loads(path.read_text())
+        for program in package.get("programs", []):
+            if program in owners:
+                fail(f"`{program}` is declared by packages `{owners[program]}` and `{package['name']}`")
+            owners[program] = package["name"]
+    for program in image["programs"]:
+        if program not in owners:
+            fail(f"`{program}` is in {recipe['base']['image']} and in no package")
+    return image, image_path, owners
+
+
+def source_archive_base(recipe, recipe_path, name, image_path, nife, checkout, dest):
+    """A base package's corresponding source: the nife commit whose tree built it, the four files
+    that decide what it contains, and a `BUILT-FROM` note.
+
+    Members, under `<name>-<version>-source/`: `packages/<name>.package.toml` (the membership),
+    `packages/base-image.toml` (the image's list), `recipes/base.toml`, `helpers/packages.py`,
+    `pins.toml` and `BUILT-FROM`. There is no `upstream/`: the source is the nife commit."""
+    top = f"{name}-{recipe['version']}-source"
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=nife, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    pins = tomllib.loads((BASALT / "pins.toml").read_text())
+    note = (
+        f"{name} {recipe['version']}, as basalt builds it for the base image.\n\n"
+        f"The source is the tree of nife at {pins['nife']['repository']} commit {commit}\n"
+        f"(the nife pin in pins.toml is {pins['nife']['commit']}). There is no upstream/ because\n"
+        "nothing is fetched: the package is built from that commit by its own\n"
+        "`cargo xtask base-packages`, and `cargo xtask base-image` composes the image from the\n"
+        "resulting packages. packages/ holds the membership and the image's list, which are the\n"
+        "four files besides the pin that decide what the package contains.\n"
+    )
+    members = [
+        (f"packages/{name}.package.toml", (nife / "packages" / f"{name}.package.toml").read_bytes()),
+        (f"packages/{image_path.name}", image_path.read_bytes()),
+        (f"recipes/{recipe_path.name}", recipe_path.read_bytes()),
+        ("helpers/packages.py", (BASALT / "helpers" / "packages.py").read_bytes()),
+        ("pins.toml", (BASALT / "pins.toml").read_bytes()),
+        ("BUILT-FROM", note.encode()),
+    ]
+    write_source_tarball(top, members, dest)
+
+
+def base_recipe():
+    """The one recipe with a `[base]` table, and its path."""
+    found = []
+    for path in sorted((BASALT / "recipes").glob("*.toml")):
+        recipe = tomllib.loads(path.read_text())
+        if "base" in recipe:
+            found.append((path, recipe))
+    if len(found) != 1:
+        fail(f"expected exactly one recipe with a [base] table, found {len(found)}")
+    return found[0]
+
+
+def build_base(nife, repository, triples):
+    """Build the base packages at the pinned nife commit and lay them out as the repository.
+
+    One `cargo xtask base-packages <arch>` per architecture, which builds the programs and packs
+    one `.nifepkg` per base package with that commit's own producer. The packages and their source
+    archives land where `build` puts them, so `publish` serves the base beside every other package.
+    Composing the image is `cargo xtask base-image <arch> --from <repository> --catalogue <index>`,
+    run by the job that boots it, so this verb stays a package build."""
+    recipe_path, recipe = base_recipe()
+    check()
+    checkout = nife.resolve()
+    nife = stage_nife(checkout)
+    image, image_path, _ = read_base_image(nife, recipe)
+    if image["version"] != recipe["version"]:
+        fail(
+            f"{recipe_path.relative_to(BASALT)}: version {recipe['version']}, but the pinned "
+            f"nife's {recipe['base']['image']} says {image['version']}"
+        )
+    targets = repository / CHANNEL / "targets"
+    metadata = repository / CHANNEL / "metadata"
+    source_dir = repository / CHANNEL / "sources"
+    for d in (targets, metadata, source_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for triple in triples:
+        arch = triple.split("-")[0]
+        packages = nife / "target" / "packages"
+        # One architecture's packages at a time, so the catalogue this writes is that arch's.
+        shutil.rmtree(packages, ignore_errors=True)
+        run(["cargo", "xtask", "base-packages", arch], cwd=nife)
+        built = sorted(packages.glob("*.nifepkg"))
+        if not built:
+            fail(f"base-packages wrote no packages for {arch}")
+        suffix = f"-{recipe['version']}-{arch}"
+        for package in built:
+            stem = package.stem
+            if not stem.endswith(suffix):
+                fail(f"{package.name}: not `{recipe['name']}-<name>{suffix}`; was it built at another version?")
+            name = stem[: -len(suffix)]
+            shutil.copyfile(package, targets / package.name)
+            digest = f"sha256:{sha256(package)}"
+            lines.append(f"{stem} {digest}\n")
+            archive = source_dir / f"{name}-{recipe['version']}-source.tar.gz"
+            source_archive_base(recipe, recipe_path, name, image_path, nife, checkout, archive)
+        print(f"packages: {len(built)} base packages for {arch}")
+    (metadata / "stand-in-index").write_text("".join(lines))
+    print(f"packages: {len(lines)} base packages in {repository}")
+    print("".join(lines), end="")
+
 
 
 def rewrite_digests(path, digests):
@@ -651,6 +778,10 @@ def build(nife, repository, triples, only=(), update_digests=False):
         if only and path.stem not in only:
             continue
         recipe = tomllib.loads(path.read_text())
+        if "base" in recipe:
+            # The base is not one program in one architecture shape; `base` builds it from the
+            # pinned checkout's own package definitions.
+            continue
         if "nife" in recipe:
             shape = build_nife_shape
         elif "object" in recipe:
@@ -754,6 +885,10 @@ def main():
     b.add_argument("--update-digests", action="store_true",
                    help="record the built packages' digests in their recipes instead of checking them")
     b.add_argument("--only", nargs="+", default=[], help="build only these recipes (by file stem)")
+    base = sub.add_parser("base")
+    base.add_argument("nife", type=pathlib.Path)
+    base.add_argument("repository", type=pathlib.Path)
+    base.add_argument("--triples", nargs="+", default=TRIPLES)
     p = sub.add_parser("publish")
     p.add_argument("repository", type=pathlib.Path)
     p.add_argument("site", type=pathlib.Path)
@@ -764,6 +899,8 @@ def main():
         check()
     elif args.verb == "build":
         build(args.nife, args.repository.resolve(), args.triples, args.only, args.update_digests)
+    elif args.verb == "base":
+        build_base(args.nife, args.repository.resolve(), args.triples)
     else:
         publish(args.repository.resolve(), args.site.resolve(), args.release)
 

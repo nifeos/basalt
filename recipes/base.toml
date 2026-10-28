@@ -1,0 +1,33 @@
+# base: the packages every nife image carries, built from the pinned nife commit.
+#
+# Milestone 909 (basalt composes the bootable image from its packages). Unlike every other recipe
+# here, this one names no program: the base's membership is nife's own declaration, milestone 611's
+# `packages/<name>.package.toml` files, and the image's program list is nife's
+# `packages/base-image.toml`. `helpers/packages.py base` reads both from the pinned checkout and
+# drives that commit's own verbs:
+#
+#   cargo xtask base-packages <arch>     build the programs and pack one `.nifepkg` per package
+#   cargo xtask base-image <arch> --from <repository> --catalogue <index> --out <dir>
+#                                        compose the kernel and initial ramdisk from those packages
+#
+# So there is one package producer and one composer, both the pin's, and this repository owns the
+# invocation, the three architectures, the repository and the boot.
+#
+# **No `[package_digest]` table.** That table holds one digest per architecture for one package;
+# the base is fifteen packages times three architectures. Their digests are the repository's
+# `rolling/stand-in-index` lines, which `publish` puts in the index every image reads, and the
+# `reproduce` job compares two independent builds byte for byte (milestone 917 (basalt's packages
+# build reproducibly)). The gap that leaves, and what closes it, is in milestone 909's BUGS.
+#
+# Every key and the `[base]` table are provisional, minted 2026-10-28 (UTC).
+
+name = "base"
+version = "0.1.0"
+# nife's own license, from the pinned checkout's root.
+license = "MIT OR Apache-2.0"
+license_files = ["LICENSE-MIT", "LICENSE-APACHE"]
+
+[base]
+# The image's membership, read from the pinned checkout. A path rather than a copy, so the pin is
+# the only place the list lives.
+image = "packages/base-image.toml"
