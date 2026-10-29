@@ -7,7 +7,7 @@
 # drives that commit's own verbs:
 #
 #   cargo xtask base-packages <arch>     build the programs and pack one `.nifepkg` per package
-#   cargo xtask base-image <arch> --from <repository> --catalogue <index> --out <dir>
+#   cargo xtask base-image <arch> --from <dir> --catalog <index> [--test] [--boot]
 #                                        compose the kernel and initial ramdisk from those packages
 #
 # So there is one package producer and one composer, both the pin's, and this repository owns the

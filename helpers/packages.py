@@ -701,7 +701,7 @@ def build_base(nife, repository, triples):
     One `cargo xtask base-packages <arch>` per architecture, which builds the programs and packs
     one `.nifepkg` per base package with that commit's own producer. The packages and their source
     archives land where `build` puts them, so `publish` serves the base beside every other package.
-    Composing the image is `cargo xtask base-image <arch> --from <repository> --catalogue <index>`,
+    Composing the image is `cargo xtask base-image <arch> --from <repository> --catalog <index>`,
     run by the job that boots it, so this verb stays a package build."""
     recipe_path, recipe = base_recipe()
     check()
