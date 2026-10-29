@@ -42,7 +42,9 @@ Four checks are required before anything merges into `main`:
 | jig installs them (swish-check-x86_64) | the same on x86_64 |
 | nife at its pin (image build and system test, three architectures) | the pinned nife commit builds and passes its own system test |
 
-`lint` (ruff on `helpers/*.py`, typos on the tree) and CodeQL run too, and are not required.
+`lint` (ruff on `helpers/*.py`, typos on the tree) and CodeQL run too, and are not required. So
+does the `composed` job, which composes and boots an image from basalt's own base packages (nife
+milestone 909 item 4); it is provisional and adding it to the ruleset is calef's act.
 
 ## Licenses
 

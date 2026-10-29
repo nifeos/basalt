@@ -63,6 +63,13 @@ does not know basalt exists.
   the run's artifact, and boots the pinned nife's interactive check with the repository named in
   `NIFE_BASALT_REPOSITORY`, so `jig update`, `jig install ripgrep` and `rg --version` are typed at
   the prompt on aarch64, riscv64 and x86_64 (nife milestone 810).
+- That workflow's `composed` job (provisional name) is nife milestone 909's other half, item 4: it
+  builds the base packages at the pin with `helpers/packages.py base <nife> <repository>`, so
+  basalt's own packages are what enter the image, and then composes each architecture's kernel and
+  initial ramdisk from them with the pin's `cargo xtask base-image <arch> --from
+  repository/rolling/targets --catalog repository/rolling/metadata/stand-in-index --test --boot`.
+  No binary in the ramdisk comes from nife's tree build. It is not one of the four required checks;
+  adding it to the ruleset is calef's act, and the README's BUGS says why it is red at this pin.
 - Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
   index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
   published with its source archive beside it, on the Release and on Pages. ioping and hackbench
@@ -189,6 +196,17 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 ```
 
 ## BUGS
+
+- **The composed-image job is red at nife `338d23348` for a nife-side reason.** The pin's
+  `cargo xtask base-packages <arch>` clears `target/packages` and packs only the packages
+  `packages/base-image.toml` names, so it never produces the `fixtures` package, and it takes no
+  flag that would. `cargo xtask base-image <arch> --test --from <targets> --catalog <index>`
+  therefore refuses, naming the directory and saying it has no archive for package `fixtures`, and
+  without `--test` the kernel's boot self-test records its `userspace` and `budget` checks red,
+  which the boot's verdict refuses. The fix belongs in nife: a flag on `base-packages` that packs
+  `fixtures` too, with `helpers/packages.py base` passing it through into a directory the composed
+  job uses and never the published repository. The `composed` job stays in the workflow so it goes
+  green on the pin that carries the flag; it is not a required check.
 
 - **Nothing is published until calef's steps above are done.** Until then the repository lives
   only as a workflow artifact, and the check serves it from nife's test index host.
