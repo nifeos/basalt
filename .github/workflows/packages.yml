@@ -2,7 +2,7 @@
 # a booted nife installs them with `jig` (nife milestone 810, `ripgrep` is packaged in basalt and
 # installed with `jig`).
 #
-# Five jobs. `build` runs helpers/packages.py on the pinned nife commit: each recipe's source is
+# Six jobs. `build` runs helpers/packages.py on the pinned nife commit: each recipe's source is
 # fetched and refused unless its SHA-256 is the recipe's, built for the three nife targets with that
 # commit's toolchain, standard library and manifest note, and packed with that commit's own
 # `cargo xtask package`. The repository it writes (`rolling/metadata/stand-in-index` and
@@ -12,6 +12,13 @@
 # fixtures, and the check types `jig update`, `jig install ripgrep` and `rg --version` at the
 # prompt on each architecture. The legs run where nife's own CI runs them: aarch64 and riscv64 on
 # the arm64 pool, x86_64 on an x86_64 runner under KVM.
+#
+# `composed` is the other half of nife milestone 909 (basalt composes the bootable image from its
+# packages): it builds the base packages at the pin with `helpers/packages.py base`, so basalt's own
+# packages are what enter the image, and then composes each architecture's kernel and initial
+# ramdisk from them with the pin's `cargo xtask base-image` and boots it. No binary in the image's
+# ramdisk came from nife's tree build. It is not one of the four names the ruleset requires (see
+# CONTRIBUTING.md); adding it there is calef's act.
 #
 # A third job, `publish`, runs on `main` only, after both: it puts the packages and their source
 # archives on a GitHub Release and the index on GitHub Pages, the project site of this repository at
@@ -194,6 +201,115 @@ jobs:
       - name: Boot nife and install from it
         working-directory: nife
         run: NIFE_BASALT_REPOSITORY="$GITHUB_WORKSPACE/repository" script/ci-build ${{ matrix.row }}
+
+  # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
+  # item 4. Not one of the four required check names, so it does not hold a merge; adding it to the
+  # ruleset's required checks is calef's act, not the lane's.
+  #
+  # CodeQL's `actions/cache-poisoning/poisonable-step` reports this job once — the `actions`
+  # language analysis, path here, the step that runs `cargo xtask base-image`. Dismissing it is
+  # calef's act. The pattern it matches is a checkout whose `ref` is `steps.pin.outputs.commit`
+  # ("commit" is what its heuristic reads as a pull request's head) followed by a command its model
+  # lists as running the checked-out code (`cargo`), in a workflow an external event
+  # (`workflow_dispatch`) can start. The path it names is a manual dispatch of the default branch,
+  # where the ref is the pin this repository records, read from the same commit by
+  # `helpers/pins.py`, and the job holds `contents: read`; a pull request's cache entries are scoped
+  # to its own branch, so no run of this job can poison the QEMU cache `main` restores. `install`
+  # above checks out the pin the same way and is not reported, because its steps call this
+  # repository's `script/*` entry points, which the model does not list. No `if:` guard can suppress
+  # it either: the query's control checks (actor, association, repository, label, environment) do
+  # not cover `workflow_dispatch`, and a dispatch of the default branch has no untrusted code to
+  # gate.
+  composed:
+    name: boots the image it composed (${{ matrix.row }})
+    needs: [build, reproduce]
+    runs-on: ${{ matrix.runner }}
+    # Three composed boots (a 180-second watch cap each) and building the base packages for two
+    # architectures on one leg. `install` and `build` take 60; this builds and boots more.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - row: composed-aarch64-riscv64
+            runner: ubuntu-24.04-arm
+            triples: aarch64-unknown-nife riscv64-unknown-nife
+            arches: aarch64 riscv64
+          - row: composed-x86_64
+            runner: ubuntu-24.04
+            triples: x86_64-unknown-nife
+            arches: x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Read the pin
+        id: pin
+        run: helpers/pins.py get nife | tee -a "$GITHUB_OUTPUT"
+      - name: Check out nife at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ steps.pin.outputs.slug }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: nife
+          persist-credentials: false
+      - name: Cache QEMU
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/nife-qemu
+          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
+      - name: Build QEMU if the cache missed
+        working-directory: nife
+        run: script/ci-qemu
+      - name: Put it on PATH
+        run: echo "$HOME/.cache/nife-qemu/bin" >> "$GITHUB_PATH"
+      - name: Provision the toolchain the pinned commit names
+        working-directory: nife
+        run: script/bootstrap
+        env:
+          NIFE_SKIP_LINT_TOOLS: "1"
+
+      # nife's own recipe for KVM on a hosted runner; the x86_64 leg takes it when it can.
+      - name: Open /dev/kvm to the runner user
+        if: matrix.runner == 'ubuntu-24.04'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # The base packages are built here, not taken from `build`'s artifact: the repository that
+      # job lays out carries the recipes' packages and no base ones, and the composed image's
+      # catalog must vouch for exactly the packages the pin's composer reads. `base` is the one
+      # builder of them; it runs the pin's own `cargo xtask base-packages` and lays the packages
+      # and the `<stem> sha256:<digest>` index where `--from` and `--catalog` read them. One
+      # runner builds only the arches it boots.
+      #
+      # `--test` asks the pin for the `fixtures` package as well, and `base` puts it and the index
+      # that lists it in the `test` channel beside `rolling`, which is what the composer's `--test`
+      # reads: the kernel's boot self-test runs two of that package's programs. Its archive never
+      # enters `rolling`, so a published index cannot name a package no release image carries.
+      - name: Build the base packages at the pin into the repository
+        run: helpers/packages.py base nife repository --triples ${{ matrix.triples }} --test
+
+      - name: Compose and boot the image from the repository
+        working-directory: nife
+        run: |
+          set -e
+          for arch in ${{ matrix.arches }}; do
+            echo "::group::compose and boot $arch"
+            cargo xtask base-image "$arch" \
+              --from "$GITHUB_WORKSPACE/repository/test/targets" \
+              --catalog "$GITHUB_WORKSPACE/repository/test/metadata/stand-in-index" \
+              --test --boot
+            echo "::endgroup::"
+          done
+
+      # A boot that stops short of the prompt is diagnosed from its serial log.
+      - name: Upload the boot logs
+        if: failure() && hashFiles('nife/target/base-image-*.log') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: composed-image-boot-logs-${{ matrix.row }}
+          path: nife/target/base-image-*.log
 
   publish:
     name: publish the index to Pages and the packages to a Release

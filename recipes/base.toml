@@ -6,18 +6,20 @@
 # `packages/base-image.toml`. `helpers/packages.py base` reads both from the pinned checkout and
 # drives that commit's own verbs:
 #
-#   cargo xtask base-packages <arch>     build the programs and pack one `.nifepkg` per package
-#   cargo xtask base-image <arch> --from <repository> --catalogue <index> --out <dir>
+#   cargo xtask base-packages <arch> [--test]
+#                                        build the programs and pack one `.nifepkg` per package;
+#                                        `--test` adds the `fixtures` package a boot check composes
+#   cargo xtask base-image <arch> --from <dir> --catalog <index> [--test] [--boot]
 #                                        compose the kernel and initial ramdisk from those packages
 #
 # So there is one package producer and one composer, both the pin's, and this repository owns the
 # invocation, the three architectures, the repository and the boot.
 #
 # **No `[package_digest]` table.** That table holds one digest per architecture for one package;
-# the base is fifteen packages times three architectures. Their digests are the repository's
-# `rolling/stand-in-index` lines, which `publish` puts in the index every image reads, and the
-# `reproduce` job compares two independent builds byte for byte (milestone 917 (basalt's packages
-# build reproducibly)). The gap that leaves, and what closes it, is in milestone 909's BUGS.
+# the base is fifteen packages times three architectures. Their digests are the index lines this
+# build writes, one per package per architecture, and the `composed` job compares a package's bytes
+# against them when it composes. Nothing publishes those lines yet, so a byte that moves without
+# changing an index passes; README.md's BUGS says so, and what closes it is milestone 909's item 2.
 #
 # Every key and the `[base]` table are provisional, minted 2026-10-28 (UTC).
 
