@@ -3,6 +3,7 @@
 
 Usage:
     helpers/packages.py build <nife-checkout> <repository-dir> [--triples T ...]
+    helpers/packages.py base <nife-checkout> <repository-dir> [--triples T ...] [--test]
     helpers/packages.py publish <repository-dir> <site-dir> --release <url>
     helpers/packages.py check
 
@@ -66,6 +67,14 @@ first-party program, a `[[bin]]` of the pinned nife's own workspace (rmle). A re
 compiled against the pinned nife's C library (ioping, hackbench and SQLite, nife milestones 906, 907
 and 897); a source with `unpack = true` is a zip extracted beside it, no member outside it.
 
+`base` builds the base image's packages rather than a recipe's program, and names no program of its
+own: the membership is the pinned checkout's `packages/<name>.package.toml` files and the list is
+its `packages/base-image.toml` (nife milestone 909). One `cargo xtask base-packages <arch>` per
+architecture builds and packs them with that commit's own producer, and this verb lays the packages
+and their source archives out as the repository `build` writes. `--test` passes the pin's `--test`,
+which adds the `fixtures` package: the kernel's boot self-test runs it and no release image carries
+it, so its archive and its index line go to a `test` channel beside `rolling`, never into it.
+
 Name and interface provisional.
 """
 
@@ -89,6 +98,11 @@ BASALT = pathlib.Path(__file__).resolve().parent.parent
 USER_AGENT = "basalt-packages (https://github.com/nifeos/basalt)"
 TRIPLES = ["aarch64-unknown-nife", "riscv64-unknown-nife", "x86_64-unknown-nife"]
 CHANNEL = "rolling"
+# The channel a composed boot check reads: the base packages plus `fixtures`, which no release
+# image carries. `publish` serves `CHANNEL` only, so a test package cannot reach an index.
+TEST_CHANNEL = "test"
+# The package only a test image carries (nife's `base_image::TEST_PACKAGE`).
+TEST_PACKAGE = "fixtures"
 
 
 def fail(message):
@@ -659,8 +673,10 @@ def source_archive_base(recipe, recipe_path, name, image_path, nife, checkout, d
     `packages/base-image.toml` (the image's list), `recipes/base.toml`, `helpers/packages.py`,
     `pins.toml` and `BUILT-FROM`. There is no `upstream/`: the source is the nife commit."""
     top = f"{name}-{recipe['version']}-source"
+    # `nife` is the staged tree, which is `git archive`'s output and has no repository to ask; the
+    # commit is the checkout's.
     commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=nife, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"], cwd=checkout, check=True, capture_output=True, text=True
     ).stdout.strip()
     pins = tomllib.loads((BASALT / "pins.toml").read_text())
     note = (
@@ -695,14 +711,17 @@ def base_recipe():
     return found[0]
 
 
-def build_base(nife, repository, triples):
+def build_base(nife, repository, triples, test=False):
     """Build the base packages at the pinned nife commit and lay them out as the repository.
 
-    One `cargo xtask base-packages <arch>` per architecture, which builds the programs and packs
-    one `.nifepkg` per base package with that commit's own producer. The packages and their source
-    archives land where `build` puts them, so `publish` serves the base beside every other package.
-    Composing the image is `cargo xtask base-image <arch> --from <repository> --catalog <index>`,
-    run by the job that boots it, so this verb stays a package build."""
+    One `cargo xtask base-packages <arch> [--test]` per architecture, which builds the programs and
+    packs one `.nifepkg` per base package with that commit's own producer. The packages and their
+    source archives land where `build` puts them, so `publish` serves the base beside every other
+    package. `test` asks the pin for the `fixtures` package too and lays that one, and the index
+    that lists it, in `TEST_CHANNEL` beside `rolling`: a composed boot check reads that channel, and
+    an index `publish` serves never names a package a release image does not carry. Composing the
+    image is `cargo xtask base-image <arch> --from <repository> --catalog <index>`, run by the job
+    that boots it, so this verb stays a package build."""
     recipe_path, recipe = base_recipe()
     check()
     checkout = nife.resolve()
@@ -716,15 +735,22 @@ def build_base(nife, repository, triples):
     targets = repository / CHANNEL / "targets"
     metadata = repository / CHANNEL / "metadata"
     source_dir = repository / CHANNEL / "sources"
+    test_targets = repository / TEST_CHANNEL / "targets"
+    test_metadata = repository / TEST_CHANNEL / "metadata"
+    test_source_dir = repository / TEST_CHANNEL / "sources"
     for d in (targets, metadata, source_dir):
         d.mkdir(parents=True, exist_ok=True)
+    if test:
+        for d in (test_targets, test_metadata, test_source_dir):
+            d.mkdir(parents=True, exist_ok=True)
     lines = []
+    test_lines = []
     for triple in triples:
         arch = triple.split("-")[0]
         packages = nife / "target" / "packages"
         # One architecture's packages at a time, so the catalogue this writes is that arch's.
         shutil.rmtree(packages, ignore_errors=True)
-        run(["cargo", "xtask", "base-packages", arch], cwd=nife)
+        run(["cargo", "xtask", "base-packages", arch] + (["--test"] if test else []), cwd=nife)
         built = sorted(packages.glob("*.nifepkg"))
         if not built:
             fail(f"base-packages wrote no packages for {arch}")
@@ -734,15 +760,29 @@ def build_base(nife, repository, triples):
             if not stem.endswith(suffix):
                 fail(f"{package.name}: not `{recipe['name']}-<name>{suffix}`; was it built at another version?")
             name = stem[: -len(suffix)]
-            shutil.copyfile(package, targets / package.name)
-            digest = f"sha256:{sha256(package)}"
-            lines.append(f"{stem} {digest}\n")
-            archive = source_dir / f"{name}-{recipe['version']}-source.tar.gz"
+            line = f"{stem} sha256:{sha256(package)}\n"
+            if name == TEST_PACKAGE:
+                if not test:
+                    fail(f"{package.name}: a test package in a release build; pass --test")
+                shutil.copyfile(package, test_targets / package.name)
+                test_lines.append(line)
+                archive = test_source_dir / f"{name}-{recipe['version']}-source.tar.gz"
+            else:
+                shutil.copyfile(package, targets / package.name)
+                lines.append(line)
+                if test:
+                    shutil.copyfile(package, test_targets / package.name)
+                    test_lines.append(line)
+                archive = source_dir / f"{name}-{recipe['version']}-source.tar.gz"
             source_archive_base(recipe, recipe_path, name, image_path, nife, checkout, archive)
         print(f"packages: {len(built)} base packages for {arch}")
     (metadata / "stand-in-index").write_text("".join(lines))
-    print(f"packages: {len(lines)} base packages in {repository}")
+    print(f"packages: {len(lines)} base packages in {repository / CHANNEL}")
     print("".join(lines), end="")
+    if test:
+        (test_metadata / "stand-in-index").write_text("".join(test_lines))
+        print(f"packages: {len(test_lines)} base packages in {repository / TEST_CHANNEL}, for a boot check")
+        print("".join(test_lines), end="")
 
 
 
@@ -889,6 +929,8 @@ def main():
     base.add_argument("nife", type=pathlib.Path)
     base.add_argument("repository", type=pathlib.Path)
     base.add_argument("--triples", nargs="+", default=TRIPLES)
+    base.add_argument("--test", action="store_true",
+                      help=f"ask the pin for the `{TEST_PACKAGE}` package too, into the {TEST_CHANNEL} channel")
     p = sub.add_parser("publish")
     p.add_argument("repository", type=pathlib.Path)
     p.add_argument("site", type=pathlib.Path)
@@ -900,7 +942,7 @@ def main():
     elif args.verb == "build":
         build(args.nife, args.repository.resolve(), args.triples, args.only, args.update_digests)
     elif args.verb == "base":
-        build_base(args.nife, args.repository.resolve(), args.triples)
+        build_base(args.nife, args.repository.resolve(), args.triples, args.test)
     else:
         publish(args.repository.resolve(), args.site.resolve(), args.release)
 

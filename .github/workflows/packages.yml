@@ -204,8 +204,7 @@ jobs:
 
   # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
   # item 4. Not one of the four required check names, so it does not hold a merge; adding it to the
-  # ruleset's required checks is calef's act, not the lane's. It is expected red until the pin's
-  # `base-packages` can pack the test image's fixtures package (README.md BUGS names that gap).
+  # ruleset's required checks is calef's act, not the lane's.
   composed:
     name: boots the image it composed (${{ matrix.row }})
     needs: [build, reproduce]
@@ -268,8 +267,13 @@ jobs:
       # builder of them; it runs the pin's own `cargo xtask base-packages` and lays the packages
       # and the `<stem> sha256:<digest>` index where `--from` and `--catalog` read them. One
       # runner builds only the arches it boots.
+      #
+      # `--test` asks the pin for the `fixtures` package as well, and `base` puts it and the index
+      # that lists it in the `test` channel beside `rolling`, which is what the composer's `--test`
+      # reads: the kernel's boot self-test runs two of that package's programs. Its archive never
+      # enters `rolling`, so a published index cannot name a package no release image carries.
       - name: Build the base packages at the pin into the repository
-        run: helpers/packages.py base nife repository --triples ${{ matrix.triples }}
+        run: helpers/packages.py base nife repository --triples ${{ matrix.triples }} --test
 
       - name: Compose and boot the image from the repository
         working-directory: nife
@@ -278,8 +282,8 @@ jobs:
           for arch in ${{ matrix.arches }}; do
             echo "::group::compose and boot $arch"
             cargo xtask base-image "$arch" \
-              --from "$GITHUB_WORKSPACE/repository/rolling/targets" \
-              --catalog "$GITHUB_WORKSPACE/repository/rolling/metadata/stand-in-index" \
+              --from "$GITHUB_WORKSPACE/repository/test/targets" \
+              --catalog "$GITHUB_WORKSPACE/repository/test/metadata/stand-in-index" \
               --test --boot
             echo "::endgroup::"
           done

@@ -64,12 +64,14 @@ does not know basalt exists.
   `NIFE_BASALT_REPOSITORY`, so `jig update`, `jig install ripgrep` and `rg --version` are typed at
   the prompt on aarch64, riscv64 and x86_64 (nife milestone 810).
 - That workflow's `composed` job (provisional name) is nife milestone 909's other half, item 4: it
-  builds the base packages at the pin with `helpers/packages.py base <nife> <repository>`, so
-  basalt's own packages are what enter the image, and then composes each architecture's kernel and
-  initial ramdisk from them with the pin's `cargo xtask base-image <arch> --from
-  repository/rolling/targets --catalog repository/rolling/metadata/stand-in-index --test --boot`.
-  No binary in the ramdisk comes from nife's tree build. It is not one of the four required checks;
-  adding it to the ruleset is calef's act, and the README's BUGS says why it is red at this pin.
+  builds the base packages at the pin with `helpers/packages.py base <nife> <repository> --test`,
+  so basalt's own packages are what enter the image, and then composes each architecture's kernel
+  and initial ramdisk from them with the pin's `cargo xtask base-image <arch> --from
+  repository/test/targets --catalog repository/test/metadata/stand-in-index --test --boot`. No
+  binary in the ramdisk comes from nife's tree build. `--test` is what carries the `fixtures`
+  package the kernel's boot self-test runs, and it lands in the `test` channel beside `rolling`,
+  which `publish` never serves. It is not one of the four required checks; adding it to the
+  ruleset is calef's act.
 - Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
   index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
   published with its source archive beside it, on the Release and on Pages. ioping and hackbench
@@ -197,16 +199,15 @@ commit=e2ee497174609a23288898a355c933d639dda53c
 
 ## BUGS
 
-- **The composed-image job is red at nife `338d23348` for a nife-side reason.** The pin's
-  `cargo xtask base-packages <arch>` clears `target/packages` and packs only the packages
-  `packages/base-image.toml` names, so it never produces the `fixtures` package, and it takes no
-  flag that would. `cargo xtask base-image <arch> --test --from <targets> --catalog <index>`
-  therefore refuses, naming the directory and saying it has no archive for package `fixtures`, and
-  without `--test` the kernel's boot self-test records its `userspace` and `budget` checks red,
-  which the boot's verdict refuses. The fix belongs in nife: a flag on `base-packages` that packs
-  `fixtures` too, with `helpers/packages.py base` passing it through into a directory the composed
-  job uses and never the published repository. The `composed` job stays in the workflow so it goes
-  green on the pin that carries the flag; it is not a required check.
+- **The base packages enter no published index yet.** `build` skips `recipes/base.toml`, whose
+  packages are the pin's own `base-packages` output rather than a program a recipe builds, and the
+  `composed` job keeps its repository on its own runner. So nothing yet writes the base into
+  `rolling/stand-in-index` or a Release, and an image composed by that job proves basalt builds
+  and boots from its own base packages while a `jig install` of one is still served by nife's
+  packages. Home: milestone 909 item 2, where the image names basalt's index.
+- **The composed job's `test` channel is built per runner and thrown away.** It exists so the
+  boot self-test's `fixtures` programs can be composed without ever entering `rolling`; a second
+  consumer of a composed test image rebuilds the base packages for itself.
 
 - **Nothing is published until calef's steps above are done.** Until then the repository lives
   only as a workflow artifact, and the check serves it from nife's test index host.
