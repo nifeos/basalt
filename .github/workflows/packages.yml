@@ -205,6 +205,21 @@ jobs:
   # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
   # item 4. Not one of the four required check names, so it does not hold a merge; adding it to the
   # ruleset's required checks is calef's act, not the lane's.
+  #
+  # CodeQL's `actions/cache-poisoning/poisonable-step` reports this job once — the `actions`
+  # language analysis, path here, the step that runs `cargo xtask base-image`. Dismissing it is
+  # calef's act. The pattern it matches is a checkout whose `ref` is `steps.pin.outputs.commit`
+  # ("commit" is what its heuristic reads as a pull request's head) followed by a command its model
+  # lists as running the checked-out code (`cargo`), in a workflow an external event
+  # (`workflow_dispatch`) can start. The path it names is a manual dispatch of the default branch,
+  # where the ref is the pin this repository records, read from the same commit by
+  # `helpers/pins.py`, and the job holds `contents: read`; a pull request's cache entries are scoped
+  # to its own branch, so no run of this job can poison the QEMU cache `main` restores. `install`
+  # above checks out the pin the same way and is not reported, because its steps call this
+  # repository's `script/*` entry points, which the model does not list. No `if:` guard can suppress
+  # it either: the query's control checks (actor, association, repository, label, environment) do
+  # not cover `workflow_dispatch`, and a dispatch of the default branch has no untrusted code to
+  # gate.
   composed:
     name: boots the image it composed (${{ matrix.row }})
     needs: [build, reproduce]
