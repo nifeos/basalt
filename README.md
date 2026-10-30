@@ -70,8 +70,8 @@ does not know basalt exists.
   repository/test/targets --catalog repository/test/metadata/stand-in-index --test --boot`. No
   binary in the ramdisk comes from nife's tree build. `--test` is what carries the `fixtures`
   package the kernel's boot self-test runs, and it lands in the `test` channel beside `rolling`,
-  which `publish` never serves. It is not one of the four required checks; adding it to the
-  ruleset is calef's act.
+  which `publish` never serves. Its two composed boots are required checks; the check names are
+  provisional.
 - Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
   index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
   published with its source archive beside it, on the Release and on Pages. ioping and hackbench
@@ -251,7 +251,7 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   `AUTOMATION_APP_ID` and `AUTOMATION_APP_KEY`. Without them it falls back to `github.token`, which
   starts no workflow (the bump then starts the gate itself) and cannot open a pull request unless
   "Allow GitHub Actions to create and approve pull requests" is on.
-- **`main` has required checks and no merge queue.** The four checks CONTRIBUTING.md lists must
+- **`main` has required checks and no merge queue.** The seven checks CONTRIBUTING.md lists must
   pass on a pull request, and the bump's pull request is merged by a person.
 - **GitHub suspends scheduled workflows after 60 days with no activity in the repository.** A bump
   pull request nobody merges is not activity.
