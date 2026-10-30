@@ -22,4 +22,4 @@ unmerged branch. Say "none" if no pin changed.
 ## Gates
 
 - [ ] `helpers/packages.py check`
-- [ ] The four required checks are green on this pull request
+- [ ] The seven required checks are green on this pull request
