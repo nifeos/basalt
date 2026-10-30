@@ -33,7 +33,7 @@ locally, though `helpers/packages.py build <nife checkout> repository` works wit
 
 ## What the gates check
 
-Four checks are required before anything merges into `main`:
+Seven checks are required before anything merges into `main`:
 
 | Check | What it proves |
 |---|---|
@@ -41,10 +41,12 @@ Four checks are required before anything merges into `main`:
 | jig installs them (swish-check-aarch64-riscv64) | a booted nife on aarch64 and riscv64 installs the packages with `jig` and runs them |
 | jig installs them (swish-check-x86_64) | the same on x86_64 |
 | nife at its pin (image build and system test, three architectures) | the pinned nife commit builds and passes its own system test |
+| lint (recipes, ruff, typos) | every recipe names a license and its license files, ruff is clean on `helpers/*.py`, and typos is clean on the tree |
+| boots the image it composed (composed-aarch64-riscv64) | an image composed from basalt's own base packages reaches the prompt on aarch64 and riscv64 |
+| boots the image it composed (composed-x86_64) | the same on x86_64 |
 
-`lint` (ruff on `helpers/*.py`, typos on the tree) and CodeQL run too, and are not required. So
-does the `composed` job, which composes and boots an image from basalt's own base packages (nife
-milestone 909 item 4); it is provisional and adding it to the ruleset is calef's act.
+CodeQL runs too, and is not required. The two composed checks compose and boot an image from
+basalt's own base packages (nife milestone 909 item 4), and their check names are provisional.
 
 ## Licenses
 
