@@ -18,7 +18,7 @@
 #
 # A second job, `lint`, checks basalt's own files in seconds: every recipe names its license
 # (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), and typos on the tree
-# (_typos.toml). It is not one of the required checks.
+# (_typos.toml). It is one of the required checks.
 #
 # Names provisional: the file, the workflow and the jobs.
 name: gate

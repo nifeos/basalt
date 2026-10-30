@@ -8,9 +8,10 @@
 #
 # **Auto-merge, and why the gate is enough.** calef approved this on 2026-10-21 (UTC) to save a
 # daily click. The required checks are the review: nife's own system test at the new pin on
-# aarch64, riscv64 and x86_64, the `packages` builds that must come out byte-identical twice, and
-# the jig installs. A merge to main publishes the index to Pages and the packages to a Release, so
-# the run arms only a pull request it can vouch for, and only when all of these hold:
+# aarch64, riscv64 and x86_64, the `packages` builds that must come out byte-identical twice, the
+# `lint` job, the jig installs, and the two composed image boots. A merge to main publishes the
+# index to Pages and the packages to a Release, so the run arms only a pull request it can vouch
+# for, and only when all of these hold:
 #   - the run is on main, and the pull request is `pin/nife` in this repository, opened by the
 #     automation App (`nife-smelter[bot]`), with the head this run pushed (`--match-head-commit`);
 #   - the diff touches only pins.toml and the `[package_digest]` lines of existing recipes

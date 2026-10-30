@@ -22,8 +22,8 @@ commits, naming and decisions, nife's skills under
   without one.
 - **A Release asset is never replaced.** A fix is a new Release.
 - **New names are provisional.** File paths, recipe keys, workflow and job names, and Release tags
-  ship marked provisional; the four required check names are fixed by the repository's ruleset and
-  are not renamed.
+  ship marked provisional; the required check names are fixed by the repository's ruleset and not
+  renamed, except the two composed ones, which stay provisional.
 - **Machine-local facts stay out.** Nothing true only of one person's machines goes in this
   public repository.
 
