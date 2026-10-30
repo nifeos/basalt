@@ -17,8 +17,8 @@
 # packages): it builds the base packages at the pin with `helpers/packages.py base`, so basalt's own
 # packages are what enter the image, and then composes each architecture's kernel and initial
 # ramdisk from them with the pin's `cargo xtask base-image` and boots it. No binary in the image's
-# ramdisk came from nife's tree build. It is not one of the four names the ruleset requires (see
-# CONTRIBUTING.md); adding it there is calef's act.
+# ramdisk came from nife's tree build. Its two boots are required checks (see CONTRIBUTING.md);
+# their names are provisional.
 #
 # A third job, `publish`, runs on `main` only, after both: it puts the packages and their source
 # archives on a GitHub Release and the index on GitHub Pages, the project site of this repository at
@@ -203,8 +203,7 @@ jobs:
         run: NIFE_BASALT_REPOSITORY="$GITHUB_WORKSPACE/repository" script/ci-build ${{ matrix.row }}
 
   # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
-  # item 4. Not one of the four required check names, so it does not hold a merge; adding it to the
-  # ruleset's required checks is calef's act, not the lane's.
+  # item 4. Its two boots are required checks; their names are provisional.
   #
   # CodeQL's `actions/cache-poisoning/poisonable-step` reports this job once — the `actions`
   # language analysis, path here, the step that runs `cargo xtask base-image`. Dismissing it is
