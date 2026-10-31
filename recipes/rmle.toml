@@ -25,5 +25,5 @@ package = "components"
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
 aarch64 = "sha256:d193bc1ef6f576aa76ee126f4630186142f4ba1c9ac43dd80883947508db7717"
-riscv64 = "sha256:48e9b830e66b1a488474662219f9fdb66095d80f7d597056e4c5e8336cbb587f"
+riscv64 = "sha256:d539721569d4a677c3fef7e212c6c478d11613d7d8b6c11f448a7a46260a096c"
 x86_64 = "sha256:1bf61759398fb242173a91d9896030d4921d0a2855db1605caf2d4477e8c269f"
