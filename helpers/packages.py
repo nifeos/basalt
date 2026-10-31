@@ -62,7 +62,7 @@ architecture, and `build` fails unless each package hashes to its line; `build -
 rewrites the table instead (nife milestone 917, basalt's packages build reproducibly).
 
 Three recipe shapes are understood, each with one program. A recipe with a `[nife]` table is a
-first-party program, a `[[bin]]` of the pinned nife's own workspace (rmle). A recipe naming a
+first-party program, a `[[bin]]` of the pinned nife's own workspace (demos). A recipe naming a
 `crate` is a Rust crate with its patched dependencies (ripgrep). A recipe with `[[source]]` and `[[object]]` tables is C
 compiled against the pinned nife's C library (ioping, hackbench and SQLite, nife milestones 906, 907
 and 897); a source with `unpack = true` is a zip extracted beside it, no member outside it.

@@ -1,4 +1,4 @@
-# demos, as a basalt package: nife's demonstration programs, the second first-party optional package
+# demos, as a basalt package: nife's demonstration programs, the first first-party optional package
 # (nife milestone 922, the demos are packaged in basalt). Debian ships examples as their own
 # packages, and nife's packages/demos.package.toml makes this one `optional`: a customer gets it
 # with `jig install demos`, never in a base image.
@@ -8,7 +8,7 @@
 # the installed program is granted it once the package is vouched.
 #
 # What is pinned: nothing is fetched. The program is built at the nife commit pins.toml names, in
-# its release profile, for each architecture's bare-metal target, as rmle is. The source archive's
+# its release profile, for each architecture's bare-metal target. The source archive's
 # `BUILT-FROM` names that commit, which is the whole of its source.
 #
 # The version is the `components` crate's. Every key, the version scheme and the file's layout are
