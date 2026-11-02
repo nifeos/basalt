@@ -365,6 +365,11 @@ jobs:
       - name: Write the site
         run: helpers/packages.py publish repository site --release "${{ steps.tag.outputs.release }}"
 
+      # The front page: web/index.html with lists of the files `publish` just wrote, so a link
+      # never names a file the site lacks. The `backup` job writes its own wording of the same page.
+      - name: Write the front page
+        run: helpers/index_page.py web/index.html site primary
+
       # A rerun of failed jobs reuses the build's artifact, so the bytes are the same and the
       # Release that exists is accepted. Different bytes under an existing tag are refused: an asset
       # is never replaced, since an index somewhere may already vouch for it. A source archive the
@@ -438,6 +443,10 @@ jobs:
       SITE_REPOSITORY: nifeos/basalt-backup
       BRANCH: pages
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
       - name: Fetch what publish deployed
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -455,6 +464,9 @@ jobs:
           mkdir site
           tar -xf deployed/artifact.tar -C site
           [ -s site/rolling/metadata/stand-in-index ] || { echo "::error::the deployed site has no index"; exit 1; }
+          [ -s site/index.html ] || { echo "::error::the deployed site has no front page"; exit 1; }
+          # The same page, worded for the backup.
+          helpers/index_page.py web/index.html site backup
           echo "$DOMAIN" > site/CNAME
           touch site/.nojekyll
           install -m 700 -d ~/.ssh
