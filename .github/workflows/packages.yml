@@ -365,6 +365,11 @@ jobs:
       - name: Write the site
         run: helpers/packages.py publish repository site --release "${{ steps.tag.outputs.release }}"
 
+      # The front page: web/index.html with lists of the files `publish` just wrote, so a link
+      # never names a file the site lacks. The `backup` job copies it with the rest.
+      - name: Write the front page
+        run: helpers/index_page.py web/index.html site
+
       # A rerun of failed jobs reuses the build's artifact, so the bytes are the same and the
       # Release that exists is accepted. Different bytes under an existing tag are refused: an asset
       # is never replaced, since an index somewhere may already vouch for it. A source archive the
@@ -455,6 +460,7 @@ jobs:
           mkdir site
           tar -xf deployed/artifact.tar -C site
           [ -s site/rolling/metadata/stand-in-index ] || { echo "::error::the deployed site has no index"; exit 1; }
+          [ -s site/index.html ] || { echo "::error::the deployed site has no front page"; exit 1; }
           echo "$DOMAIN" > site/CNAME
           touch site/.nojekyll
           install -m 700 -d ~/.ssh
