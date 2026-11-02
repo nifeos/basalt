@@ -2,9 +2,12 @@
 """Write the site's front page, listing what `publish` put under rolling/ (name provisional).
 
 Usage:
-    helpers/index_page.py <template> <site-dir>
+    helpers/index_page.py <template> <site-dir> primary|backup
 
-The template is web/index.html. Its three markers, @@METADATA@@, @@SOURCES@@ and @@TARGETS@@, are
+The role says which address the page is for: the primary site, basalt.nifeos.org, or the backup,
+basalt.crickertech.com. They differ in one paragraph, @@ADDRESS@@, and nothing else.
+
+The template is web/index.html. Its list markers @@METADATA@@, @@SOURCES@@ and @@TARGETS@@ are
 replaced by lists of links to the files actually under <site-dir>/rolling/metadata, sources and
 targets, so a link never names a file the site lacks. The result is <site-dir>/index.html. Links
 are relative, so one page serves every address the site has. A missing directory or an empty one
@@ -16,6 +19,16 @@ import pathlib
 import sys
 import urllib.parse
 
+ADDRESS = {
+    "primary": (
+        "This is the primary address, <code>basalt.nifeos.org</code>. "
+        "<code>basalt.crickertech.com</code> is a backup of this site, with the same files."
+    ),
+    "backup": (
+        "This is a backup of <code>basalt.nifeos.org</code>, which is the address to use. "
+        "This copy is for when that one cannot be reached."
+    ),
+}
 SECTIONS = (("@@METADATA@@", "metadata"), ("@@SOURCES@@", "sources"), ("@@TARGETS@@", "targets"))
 
 
@@ -42,10 +55,13 @@ def listing(rolling, name):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4 or sys.argv[3] not in ADDRESS:
         sys.exit(__doc__)
     template, site = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
     page = template.read_text()
+    if page.count("@@ADDRESS@@") != 1:
+        sys.exit(f"index_page: {template} must hold @@ADDRESS@@ exactly once")
+    page = page.replace("@@ADDRESS@@", ADDRESS[sys.argv[3]])
     for marker, name in SECTIONS:
         if page.count(marker) != 1:
             sys.exit(f"index_page: {template} must hold {marker} exactly once")
