@@ -50,5 +50,5 @@ cflags = ["-O2", "-D_GNU_SOURCE", "-DVERSION=2.11", "-Wno-incompatible-pointer-t
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
 aarch64 = "sha256:1db9f85915fc2c66a58a79b6303d745935893ec6873887129a6fafc04216fdd9"
-riscv64 = "sha256:1a9f2ed9be8c601aab9a8084b0449c67e66087b58343db32595286e4bb4887ae"
-x86_64 = "sha256:02e64322f03047fab71bf41f0021edb979fcc88d51297fbed752bcfd1492a1a4"
+riscv64 = "sha256:1b40f9eabe31f2cd3490903ac21f8bea5630906059aad31cca3ff9154f9dc03c"
+x86_64 = "sha256:acae4dd44ca9bf6ec77c3eab87623d8805add3e6446841d27add6636573e227d"
