@@ -60,5 +60,5 @@ cflags = [
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
 aarch64 = "sha256:b039f7bf0e1f90d30829991060a22e8fbd66a4d672dde923539459ed6003c6c0"
-riscv64 = "sha256:b4f90bc1071caf4e6cb81472aa7439c4c206bb4568e0e7f934c3b13bd56c6b6e"
-x86_64 = "sha256:8d15879167f200b7e0c8f05d2b37a2a388afa1479500d638cfea7825f0946c29"
+riscv64 = "sha256:836f66e6e2efcbe7435666d002cff178e4ebc74669dd9e0ead60e2e477cfc743"
+x86_64 = "sha256:e992e0fed8950c336c2e9a812b90cdfc97e7abf789fd39f9dd2d6166358f9d1b"

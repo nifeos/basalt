@@ -49,5 +49,5 @@ cflags = ["-O2", "-std=gnu99", "-DEXTRA_VERSION=\"\""]
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
 aarch64 = "sha256:49d8137a0a36647b588adb6846222750f60e9bd7e90e84ce550ef12c5aa69373"
-riscv64 = "sha256:2a1e207f080431b9c1db2ad01bc61bf9a0fbbb46f49ad15593e70dd47bab4b00"
-x86_64 = "sha256:bcd466ff561ee09b5c1454bb82c3e3220edc5cbff9cdf33fb9815f9d17bdda4c"
+riscv64 = "sha256:eb08bda98917b6d679c9e43b617d48c460fa8b33408bdd3ecd021676553a11c1"
+x86_64 = "sha256:fa0cde69e44997227f6727d55574d1383515a22651e643164be8a747c82b6c82"
