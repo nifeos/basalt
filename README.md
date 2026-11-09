@@ -1,5 +1,8 @@
 # basalt
 
+[![gate](https://github.com/nifeos/basalt/actions/workflows/gate.yml/badge.svg?branch=main)](https://github.com/nifeos/basalt/actions/workflows/gate.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/basalt#licenses)
+
 The first-party distribution of [nife](https://github.com/nifeos/nife).
 
 The naming convention, so nobody has to ask: the kernel is named for the core (`nife`, Suess's
