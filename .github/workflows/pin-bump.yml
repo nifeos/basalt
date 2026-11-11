@@ -143,6 +143,12 @@ jobs:
           path: nife
           persist-credentials: false
 
+      # helpers/apt-mirror-fallback.sh: apt retries, and a second Ubuntu mirror when the archive hosts
+      # do not resolve; its header says why. Name: provisional.
+      - name: Keep apt working when Ubuntu's archive does not resolve
+        if: steps.plan.outputs.skip == 'false'
+        run: helpers/apt-mirror-fallback.sh
+
       - name: Provision the toolchain the new pin names
         if: steps.plan.outputs.skip == 'false'
         working-directory: nife
