@@ -28,12 +28,12 @@ license = "GPL-2.0-or-later"
 license_files = ["COPYING"]
 
 [[source]]
-url = "https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git/plain/src/hackbench/hackbench.c?h=v2.11"
+url = "recipes/sources/hackbench/hackbench.c"
 file = "hackbench.c"
 sha256 = "36e5b4c86aee10fa7422e16c2a3cb218e7b040a364fe52f943ad8d68b167ac3e"
 
 [[source]]
-url = "https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git/plain/COPYING?h=v2.11"
+url = "recipes/sources/hackbench/COPYING"
 file = "COPYING"
 sha256 = "ab15fd526bd8dd18a9e77ebc139656bf4d33e97fc7238cd11bf60e2b9b8666c6"
 
