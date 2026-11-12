@@ -2,7 +2,7 @@
 # are diffs against upstream text, so their typos are not basalt's to fix.
 
 [files]
-extend-exclude = ["patches/"]
+extend-exclude = ["patches/", "recipes/sources/"]
 
 [default]
 # A hex digest prefix is not a word (nife's _typos.toml has the reasoning).
