@@ -294,14 +294,27 @@ def sha256(path):
 
 
 def fetch(url, path, want):
-    """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does."""
+    """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does.
+
+    A URL may be an http(s) address or a path inside this repository (relative to BASALT), so a
+    source that cannot be reached on the network (kernel.org during an outage, or a runner with no
+    egress) can be vendored under recipes/sources/ and read from there. The digest, not the
+    transport, decides whether the bytes are taken."""
     if not path.exists() or sha256(path) != want:
         print(f"packages: fetching {url}")
-        # A named User-Agent: kernel.org refuses Python's default one with 403. The digest, not
-        # the transport, decides whether the bytes are taken.
-        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(request, timeout=120) as r:
-            path.write_bytes(r.read())
+        if url.startswith(("http://", "https://")):
+            # A named User-Agent: kernel.org refuses Python's default one with 403. The digest, not
+            # the transport, decides whether the bytes are taken.
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=120) as r:
+                path.write_bytes(r.read())
+        elif url.startswith("file://"):
+            path.write_bytes(pathlib.Path(url[len("file://"):]).read_bytes())
+        else:
+            source_path = (BASALT / url).resolve()
+            if not source_path.is_file():
+                fail(f"{url}: vendored source not found at {source_path}")
+            path.write_bytes(source_path.read_bytes())
     got = sha256(path)
     if got != want:
         path.unlink()
