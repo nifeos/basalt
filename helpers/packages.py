@@ -90,7 +90,9 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import tomllib
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -293,28 +295,42 @@ def sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def fetch(url, path, want):
-    """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does.
+FETCH_ATTEMPTS = 5
+FETCH_FIRST_DELAY_SECONDS = 2
 
-    A URL may be an http(s) address or a path inside this repository (relative to BASALT), so a
-    source that cannot be reached on the network (kernel.org during an outage, or a runner with no
-    egress) can be vendored under recipes/sources/ and read from there. The digest, not the
-    transport, decides whether the bytes are taken."""
+
+def download(url):
+    """The body at `url`, tried up to FETCH_ATTEMPTS times with doubling waits (2, 4, 8, 16 s).
+
+    A network error, any other OSError (a timeout is one) and an HTTP 5xx are retried: a build
+    runner losing its route for a moment must not fail a build. Any other HTTP status is final.
+    """
+    # A named User-Agent: kernel.org refuses Python's default one with 403.
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    delay = FETCH_FIRST_DELAY_SECONDS
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500:
+                fail(f"{url}: HTTP {e.code} ({e.reason}); not retried")
+            error = e
+        except OSError as e:  # URLError is one
+            error = e
+        if attempt == FETCH_ATTEMPTS:
+            fail(f"{url}: gave up after {FETCH_ATTEMPTS} attempts; last error: {error}")
+        print(f"packages: attempt {attempt} of {FETCH_ATTEMPTS} failed ({error}); retrying in {delay}s")
+        time.sleep(delay)
+        delay *= 2
+
+
+def fetch(url, path, want):
+    """`url` into `path`, refused unless it hashes to `want`. A copy already there is kept if it does."""
     if not path.exists() or sha256(path) != want:
         print(f"packages: fetching {url}")
-        if url.startswith(("http://", "https://")):
-            # A named User-Agent: kernel.org refuses Python's default one with 403. The digest, not
-            # the transport, decides whether the bytes are taken.
-            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(request, timeout=120) as r:
-                path.write_bytes(r.read())
-        elif url.startswith("file://"):
-            path.write_bytes(pathlib.Path(url[len("file://"):]).read_bytes())
-        else:
-            source_path = (BASALT / url).resolve()
-            if not source_path.is_file():
-                fail(f"{url}: vendored source not found at {source_path}")
-            path.write_bytes(source_path.read_bytes())
+        # The digest, not the transport, decides whether the bytes are taken.
+        path.write_bytes(download(url))
     got = sha256(path)
     if got != want:
         path.unlink()

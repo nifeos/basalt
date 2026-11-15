@@ -143,6 +143,8 @@ jobs:
           persist-credentials: false
       - name: Every recipe names its license and license files
         run: python3 helpers/packages.py check
+      - name: helpers' own tests
+        run: python3 -m unittest discover -s helpers
       - name: ruff
         run: pipx run ruff==0.16.9 check helpers/
       - name: typos
