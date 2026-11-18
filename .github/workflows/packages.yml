@@ -153,10 +153,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `row` is the required check's name and stays fixed. `checks` are nife's rows that the leg
+          # runs: nife split `swish-check-aarch64-riscv64` into one row per architecture, and the
+          # step below runs the combined row instead when the pinned nife still has it.
           - row: swish-check-aarch64-riscv64
             runner: ubuntu-24.04-arm
+            checks: swish-check-aarch64 swish-check-riscv64
+            combined: swish-check-aarch64-riscv64
           - row: swish-check-x86_64
             runner: ubuntu-24.04
+            checks: swish-check-x86_64
+            combined: swish-check-x86_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
@@ -210,7 +217,17 @@ jobs:
 
       - name: Boot nife and install from it
         working-directory: nife
-        run: NIFE_BASALT_REPOSITORY="$GITHUB_WORKSPACE/repository" script/ci-build ${{ matrix.row }}
+        env:
+          CHECKS: ${{ matrix.checks }}
+          COMBINED: ${{ matrix.combined }}
+        run: |
+          export NIFE_BASALT_REPOSITORY="$GITHUB_WORKSPACE/repository"
+          if grep -q "^${COMBINED}|" script/ci-build; then
+            CHECKS="$COMBINED"
+          fi
+          for check in $CHECKS; do
+            script/ci-build "$check"
+          done
 
   # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
   # item 4. Its two boots are required checks; their names are provisional.
