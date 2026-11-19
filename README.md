@@ -64,7 +64,10 @@ does not know basalt exists.
 - [`packages`](.github/workflows/packages.yml) runs that build at the pin, keeps the repository as
   the run's artifact, and boots the pinned nife's interactive check with the repository named in
   `NIFE_BASALT_REPOSITORY`, so `jig update`, `jig install ripgrep` and `rg --version` are typed at
-  the prompt on aarch64, riscv64 and x86_64 (nife milestone 810).
+  the prompt on aarch64, riscv64 and x86_64 (nife milestone 810). The same job runs the pinned
+  nife's `rg-threads` rows on that repository: `rg` walking in parallel at four cores, and the
+  unmodified `ioping`, `hackbench` and `sqlite` programs. The pair under test is the pin's pair:
+  the bytes `publish` serves, on the nife commit they were built against (nife milestone 994).
 - That workflow's `composed` job (provisional name) is nife milestone 909's other half, item 4: it
   builds the base packages at the pin with `helpers/packages.py base <nife> <repository> --test`,
   so basalt's own packages are what enter the image, and then composes each architecture's kernel
