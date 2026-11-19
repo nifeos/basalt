@@ -10,8 +10,11 @@
 # check, `script/ci-build`'s swish-check rows, with that repository named in
 # `NIFE_BASALT_REPOSITORY`: the test index host then serves basalt's packages beside nife's
 # fixtures, and the check types `jig update`, `jig install ripgrep` and `rg --version` at the
-# prompt on each architecture. The legs run where nife's own CI runs them: aarch64 and riscv64 on
-# the arm64 pool, x86_64 on an x86_64 runner under KVM.
+# prompt on each architecture. Two more legs run nife's `rg-threads` rows on the same repository:
+# `rg` walking a tree in parallel at four cores, and the unmodified `ioping`, `hackbench` and
+# `sqlite` programs, so the bytes this repository publishes meet the nife commit they were built
+# against (nife milestone 994, the cross-repository pair is tested where the pin is). The legs run
+# aarch64 and riscv64 on the arm64 pool, and x86_64 on an x86_64 runner under KVM.
 #
 # `composed` is the other half of nife milestone 909 (basalt composes the bootable image from its
 # packages): it builds the base packages at the pin with `helpers/packages.py base`, so basalt's own
@@ -164,6 +167,15 @@ jobs:
             runner: ubuntu-24.04
             checks: swish-check-x86_64
             combined: swish-check-x86_64
+          # The two `rg-threads` legs are not required checks.
+          - row: rg-threads-aarch64-riscv64
+            runner: ubuntu-24.04-arm
+            checks: rg-threads-aarch64-riscv64
+            combined: rg-threads-aarch64-riscv64
+          - row: rg-threads-x86_64
+            runner: ubuntu-24.04
+            checks: rg-threads-x86_64
+            combined: rg-threads-x86_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read the pin
