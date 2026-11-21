@@ -44,6 +44,6 @@ file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
 # Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
-aarch64 = "sha256:fbb8c5517964742bd9867dbeecff422f5ba4d6c635db166e1345bddcbc08076e"
-riscv64 = "sha256:8b71399f8ac74dc3bd060f5bc7845222a525952108d4e09cd0a06a7d4d17981f"
-x86_64 = "sha256:0d2c1a296bf791c837deb92c33712daff6c64d4b776864619356ccfd2d95b1fe"
+aarch64 = "sha256:633ea99d7583456aba2e1b38b88209dd02d94ae0d15fbea2b498061e1ef2899b"
+riscv64 = "sha256:f2c564f07d027889cc6aa511610c65f354b0025dab04da04ae567de169755b36"
+x86_64 = "sha256:9f23a8446a74889f497a38e0f3e98c217b98781fb899967283f297964f024bde"
