@@ -15,7 +15,7 @@ Say "none" if no recipe changed.
 ## Pins
 
 <!--
-A pin bump names the landed commit it takes (`nifeos/<repo>@<sha>`). A pin never points at an
+A pin bump names the landed commit it takes (`partsfoundry/<repo>@<sha>`). A pin never points at an
 unmerged branch. Say "none" if no pin changed.
 -->
 

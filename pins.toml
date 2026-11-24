@@ -6,7 +6,7 @@
 # commit's own toolchain and runs that commit's own system test. The pin-bump workflow proposes a
 # new nife commit as a pull request.
 #
-# `[record]` is the design record, `nifeos/record`, which has no build: the gate builds nothing for
+# `[record]` is the design record, `partsfoundry/record`, which has no build: the gate builds nothing for
 # it. It says which commit of the record goes with this distribution, so a reader that follows the
 # record from nife (nife's `helpers/record_root.py`) reads it at one commit rather than at whatever
 # the record's main is that day. The record-pin-bump workflow proposes the record's newest main
@@ -17,9 +17,9 @@
 # by the maintainer). They are no longer provisional.
 
 [nife]
-repository = "https://github.com/nifeos/nife"
+repository = "https://github.com/partsfoundry/nife"
 commit = "231595b9b996c37367024a2406da2355b40651ab"
 
 [record]
-repository = "https://github.com/nifeos/record"
+repository = "https://github.com/partsfoundry/record"
 commit = "802831acceac8886c1cb9faa14e2fa09d35db1f0"

@@ -1,6 +1,6 @@
 # record pin bump: propose moving the `[record]` pin in pins.toml to the record's newest main commit.
 #
-# The design record, `nifeos/record`, has no build. Its pin says which commit of the record goes with
+# The design record, `partsfoundry/record`, has no build. Its pin says which commit of the record goes with
 # this distribution, and nife reads the record at that commit once the record has left nife (nife
 # milestone 1018, step 6; nife's `helpers/record_root.py`). The record's main requires its own
 # `record lint` check through a ruleset and a merge queue, so every commit on it has passed that
@@ -165,7 +165,7 @@ jobs:
           title="pin record at $short_target"
           body="**Lane:** $branch, opened by the record pin-bump workflow.
 
-          Moves the design record (\`nifeos/record\`) from \`$short_current\` to \`$short_target\`:
+          Moves the design record (\`partsfoundry/record\`) from \`$short_current\` to \`$short_target\`:
           [what changed]($REPOSITORY/compare/$CURRENT...$TARGET). Every commit on the record's main
           passed its \`record lint\` check on the way in, through the record's merge queue.
 

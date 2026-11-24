@@ -9,7 +9,7 @@ repository can receive.
 
 A flaw in nife itself (a confined program escaping, a kernel panic from user space, `jig` accepting
 bytes the index does not vouch for) belongs to nife: see
-[nife's SECURITY.md](https://github.com/nifeos/nife/blob/main/SECURITY.md).
+[nife's SECURITY.md](https://github.com/partsfoundry/nife/blob/main/SECURITY.md).
 
 ## Reporting
 

@@ -1,9 +1,9 @@
 # basalt
 
-[![gate](https://github.com/nifeos/basalt/actions/workflows/gate.yml/badge.svg?branch=main)](https://github.com/nifeos/basalt/actions/workflows/gate.yml?query=branch%3Amain)
-[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/basalt#licenses)
+[![gate](https://github.com/partsfoundry/basalt/actions/workflows/gate.yml/badge.svg?branch=main)](https://github.com/partsfoundry/basalt/actions/workflows/gate.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/partsfoundry/basalt#licenses)
 
-The first-party distribution of [nife](https://github.com/nifeos/nife).
+The first-party distribution of [nife](https://github.com/partsfoundry/nife).
 
 The naming convention, so nobody has to ask: the kernel is named for the core (`nife`, Suess's
 nickel-iron), distributions are named for rocks, and a mineral is simply the fitting name for a
@@ -13,7 +13,7 @@ is an aggregate of programs. There are hundreds of named rocks, so naming your o
 requires no permission and no coordination with this project; only `basalt` is reserved.
 
 What a distribution actually packages is an open question, recorded in the design record
-([`design/what-a-distribution-packages.md`](https://github.com/nifeos/record/blob/main/design/what-a-distribution-packages.md)).
+([`design/what-a-distribution-packages.md`](https://github.com/partsfoundry/record/blob/main/design/what-a-distribution-packages.md)).
 
 ## What is here today
 
@@ -22,7 +22,7 @@ pin builds and passes its own system test. Nothing has moved out of the nife rep
 does not know basalt exists.
 
 - [`pins.toml`](pins.toml) names each component by repository and full commit id. Today that is
-  `nife`, which the gate builds, and `record`, the design record (`nifeos/record`), which has no
+  `nife`, which the gate builds, and `record`, the design record (`partsfoundry/record`), which has no
   build: its pin says which commit of the record goes with this distribution.
 - [`gate`](.github/workflows/gate.yml) checks out the pinned commit and runs nife's own
   `script/ci-build test` there: the toolchain and QEMU that commit names, then each architecture's
@@ -106,7 +106,7 @@ calef ruled on 2026-10-12 (UTC). Asked whether `basalt.nifeos.org` should be a V
 GitHub Pages, Cloudflare, or S3 and CloudFront, he answered *"b"*, GitHub Pages. Asked then how
 adoption would be measured, he answered *"Packages on Releases, index on Pages"*. Later the same
 day: basalt must not become the organization's Pages site, because `www.nifeos.org` will be its
-own site from `nifeos/nifeos.github.io`.
+own site from `partsfoundry/partsfoundry.github.io`.
 
 | What | Where | Why |
 |---|---|---|
@@ -118,9 +118,9 @@ own site from `nifeos/nifeos.github.io`.
 
 Each index line names its package's Release asset as a listed location, with the root its
 certificate chains to:
-`<stem> sha256:<hex> sectigo-root-e46=https://github.com/nifeos/basalt/releases/download/<tag>/<stem>.nifepkg`.
+`<stem> sha256:<hex> sectigo-root-e46=https://github.com/partsfoundry/basalt/releases/download/<tag>/<stem>.nifepkg`.
 `github.com` chains to Sectigo Public Server Authentication Root E46, not ISRG Root X1. calef ruled
-on 2026-10-12 (UTC), answering *"a"* on nifeos/nife#2048, that the index may name that root for a
+on 2026-10-12 (UTC), answering *"a"* on partsfoundry/nife#2048, that the index may name that root for a
 listed location among the roots an image carries, and that `jig` follows exactly one redirect, held
 to ISRG Root X1 and to the public-address rule. That redirect goes to
 `release-assets.githubusercontent.com`, which serves the bytes.
@@ -133,13 +133,13 @@ work.
 The `publish` job refuses to run until step 3 is done, and says what is missing.
 
 1. In the DNS zone for `nifeos.org` (Netlify DNS, measured 2026-10-13 UTC), add
-   `basalt CNAME nifeos.github.io.` and nothing else for that name.
+   `basalt CNAME partsfoundry.github.io.` and nothing else for that name.
 2. Recommended first, so nobody else can claim the name: verify `nifeos.org` for the organization
    (organization Settings, Pages, "Add a domain"; it asks for one TXT record,
    `_github-pages-challenge-nifeos.nifeos.org`).
 3. In this repository's Settings, Pages: Source "GitHub Actions"; Custom domain
    `basalt.nifeos.org`; once the certificate is issued, tick "Enforce HTTPS". Do not create
-   `nifeos/nifeos.github.io` for this. basalt is a project site, and its custom domain must be set
+   `partsfoundry/partsfoundry.github.io` for this. basalt is a project site, and its custom domain must be set
    here, or once the organization's site takes `www.nifeos.org` this index would be served at
    `www.nifeos.org/basalt`, a name no image carries.
 4. Land #12, then #13, then run `packages` on `main` (`gh workflow run packages.yml`) or let the
@@ -155,17 +155,17 @@ The `backup` job fails, without holding back `basalt.nifeos.org`, until steps 1 
 1. Give the job its key, so nothing else can push to the second site (run anywhere with `gh`
    signed in as an organization owner):
    `ssh-keygen -t ed25519 -N '' -C 'basalt backup' -f backup_key`, then
-   `gh repo deploy-key add backup_key.pub --repo nifeos/basalt-backup --allow-write --title 'basalt publish'`,
-   then `gh secret set BACKUP_DEPLOY_KEY --repo nifeos/basalt < backup_key`, then
+   `gh repo deploy-key add backup_key.pub --repo partsfoundry/basalt-backup --allow-write --title 'basalt publish'`,
+   then `gh secret set BACKUP_DEPLOY_KEY --repo partsfoundry/basalt < backup_key`, then
    `rm backup_key backup_key.pub`.
-2. Run `packages` on `main` (`gh workflow run packages.yml --repo nifeos/basalt`). `backup` creates
+2. Run `packages` on `main` (`gh workflow run packages.yml --repo partsfoundry/basalt`). `backup` creates
    the `pages` branch of `nifeos/basalt-backup`, with a `CNAME` naming `basalt.crickertech.com`.
 3. Recommended before the DNS record, so nobody else can claim the name: verify `crickertech.com`
    for the organization (organization Settings, Pages, "Add a domain"; one TXT record,
    `_github-pages-challenge-nifeos.crickertech.com`).
 4. In the zone for `crickertech.com` (GoDaddy's registration, NS1's name servers), add
-   `basalt CNAME nifeos.github.io.` and nothing else for that name.
-5. In `nifeos/basalt-backup`'s Settings, Pages: Source "Deploy from a branch", branch `pages`, folder
+   `basalt CNAME partsfoundry.github.io.` and nothing else for that name.
+5. In `partsfoundry/basalt-backup`'s Settings, Pages: Source "Deploy from a branch", branch `pages`, folder
    `/`; Custom domain `basalt.crickertech.com`; once the certificate is issued, tick "Enforce HTTPS".
 6. Check what an image will see: `curl -sS -o /dev/null -w '%{http_code}\n'
    https://basalt.crickertech.com/rolling/metadata/stand-in-index` prints `200`, and
@@ -202,8 +202,8 @@ Read the current pin:
 
 ```sh
 $ helpers/pins.py get nife
-repository=https://github.com/nifeos/nife
-slug=nifeos/nife
+repository=https://github.com/partsfoundry/nife
+slug=partsfoundry/nife
 commit=e2ee497174609a23288898a355c933d639dda53c
 ```
 

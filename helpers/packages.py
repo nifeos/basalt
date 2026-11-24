@@ -95,7 +95,7 @@ import urllib.request
 import zipfile
 
 BASALT = pathlib.Path(__file__).resolve().parent.parent
-USER_AGENT = "basalt-packages (https://github.com/nifeos/basalt)"
+USER_AGENT = "basalt-packages (https://github.com/partsfoundry/basalt)"
 TRIPLES = ["aarch64-unknown-nife", "riscv64-unknown-nife", "x86_64-unknown-nife"]
 CHANNEL = "rolling"
 # The channel a composed boot check reads: the base packages plus `fixtures`, which no release
@@ -431,7 +431,7 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         env.update(
             {
                 # nife's release profile carries overflow checks
-                # (`nifeos/record:notes/overflow-checks.md`).
+                # (`partsfoundry/record:notes/overflow-checks.md`).
                 "CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS": "true",
                 "RUSTUP_TOOLCHAIN": str(nife / "target" / "nife-farm"),
                 # Symbols too, not only debug info, as nife strips every program it packs: a package

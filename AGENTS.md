@@ -5,13 +5,13 @@ commit, [`recipes/`](recipes/) says how each package is built, and the workflows
 publish them. Read the workspace's front page first (`CLAUDE.md` in the directory that holds every
 nifeos checkout); it says which repository owns what and how a change crosses repositories. For
 commits, naming and decisions, nife's skills under
-[`notes/skills/`](https://github.com/nifeos/nife/tree/main/notes/skills) apply here too.
+[`notes/skills/`](https://github.com/partsfoundry/nife/tree/main/notes/skills) apply here too.
 
 ## basalt's own rules
 
 - **A pin never points at an unmerged branch.** A change lands in the repository that owns it
   first; the pin bump that takes it is a separate pull request citing the landed commit
-  (`nifeos/<repo>@<sha>`), and records the dependency on its side only.
+  (`partsfoundry/<repo>@<sha>`), and records the dependency on its side only.
 - **Every recipe names its license and its license files.** `license` is an SPDX expression and
   `license_files` are paths inside the upstream source. `helpers/packages.py check` refuses a recipe
   without them, and the build runs it first.

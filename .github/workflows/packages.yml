@@ -30,7 +30,7 @@
 # adoption signal (nife milestone 576). It refuses to run until Pages is enabled with that domain,
 # which is calef's act (the README's "What calef must do"). After it, `backup` copies the same
 # files to the index's second address, `basalt.crickertech.com`, the Pages site of
-# nifeos/basalt-backup (nife §250 clause 6).
+# partsfoundry/basalt-backup (nife §250 clause 6).
 #
 # Names provisional: the file, the workflow, the jobs, the artifact and the Release tag scheme.
 name: packages
@@ -377,7 +377,7 @@ jobs:
 
       # Before anything is created: the index must land at the name every image carries. Without a
       # custom domain a project site is served under the organization's Pages host, and once the
-      # organization's own site (nifeos/nifeos.github.io) takes www.nifeos.org that would put this
+      # organization's own site (partsfoundry/partsfoundry.github.io) takes www.nifeos.org that would put this
       # index at www.nifeos.org/basalt, a name no image carries.
       - name: Pages must be on, from Actions, at basalt.nifeos.org
         run: |
@@ -466,7 +466,7 @@ jobs:
 
   # The index's second address, basalt.crickertech.com (nife §250 clause 6; calef, 2026-10-21 UTC:
   # "P1: a second Pages site in nifeos for basalt.crickertech.com"). Pages serves one custom domain
-  # per site, so it is the site of its own repository, nifeos/basalt-backup, which serves its
+  # per site, so it is the site of its own repository, partsfoundry/basalt-backup, which serves its
   # `pages` branch. This job replaces that branch with the very files `publish` deployed, plus the
   # two a branch-built site needs: CNAME (its custom domain) and .nojekyll (serve files as they are).
   # A separate job so that a failure here never holds back basalt.nifeos.org; it fails loudly
@@ -484,7 +484,7 @@ jobs:
       cancel-in-progress: false
     env:
       DOMAIN: basalt.crickertech.com
-      SITE_REPOSITORY: nifeos/basalt-backup
+      SITE_REPOSITORY: partsfoundry/basalt-backup
       BRANCH: pages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
