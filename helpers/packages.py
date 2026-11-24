@@ -430,7 +430,8 @@ def build_ripgrep_shape(recipe, nife, work, triples):
         env = dict(os.environ, **TRIM_PATHS)
         env.update(
             {
-                # nife's release profile carries overflow checks (its notes/overflow-checks.md).
+                # nife's release profile carries overflow checks
+                # (`nifeos/record:notes/overflow-checks.md`).
                 "CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS": "true",
                 "RUSTUP_TOOLCHAIN": str(nife / "target" / "nife-farm"),
                 # Symbols too, not only debug info, as nife strips every program it packs: a package

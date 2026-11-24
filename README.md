@@ -12,8 +12,8 @@ requirement (calef, 2026-10-28 UTC). A rock is an aggregate of minerals the way 
 is an aggregate of programs. There are hundreds of named rocks, so naming your own distribution
 requires no permission and no coordination with this project; only `basalt` is reserved.
 
-What a distribution actually packages is an open question, recorded in the nife tree
-([`design/what-a-distribution-packages.md`](https://github.com/nifeos/nife/blob/main/design/what-a-distribution-packages.md)).
+What a distribution actually packages is an open question, recorded in the design record
+([`design/what-a-distribution-packages.md`](https://github.com/nifeos/record/blob/main/design/what-a-distribution-packages.md)).
 
 ## What is here today
 
