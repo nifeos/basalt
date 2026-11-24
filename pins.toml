@@ -2,9 +2,15 @@
 #
 # One table per component. `repository` is where the source lives and `commit` is the full
 # 40-character commit basalt builds; a branch or tag name is refused, because a pin that moves on its
-# own is not a pin. The gate workflow builds each component at this commit with that commit's own
-# toolchain and runs that commit's own system test. The pin-bump workflow proposes a new commit as a
-# pull request.
+# own is not a pin. The gate workflow builds the `[nife]` component at this commit with that
+# commit's own toolchain and runs that commit's own system test. The pin-bump workflow proposes a
+# new nife commit as a pull request.
+#
+# `[record]` is the design record, `nifeos/record`, which has no build: the gate builds nothing for
+# it. It says which commit of the record goes with this distribution, so a reader that follows the
+# record from nife (nife's `helpers/record_root.py`) reads it at one commit rather than at whatever
+# the record's main is that day. The record-pin-bump workflow proposes the record's newest main
+# commit after each merge there. Table name provisional.
 #
 # The file name, the format and the key names are ratified: `pins.toml`, one table per component,
 # the keys `repository` and `commit` (calef, 2026-10-28 UTC, in the maintainer's session, relayed
@@ -13,3 +19,7 @@
 [nife]
 repository = "https://github.com/nifeos/nife"
 commit = "edcbb220915f701b4fa4a79bc57dd9856a006a72"
+
+[record]
+repository = "https://github.com/nifeos/record"
+commit = "3de196f76e3aebd7431f117ae26d0b0f8c313359"
