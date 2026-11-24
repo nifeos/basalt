@@ -21,8 +21,9 @@ The smallest thing that is still a distribution: one component, pinned, and a ga
 pin builds and passes its own system test. Nothing has moved out of the nife repository, and nife
 does not know basalt exists.
 
-- [`pins.toml`](pins.toml) names each component by repository and full commit id. Today that is one
-  entry, `nife`.
+- [`pins.toml`](pins.toml) names each component by repository and full commit id. Today that is
+  `nife`, which the gate builds, and `record`, the design record (`nifeos/record`), which has no
+  build: its pin says which commit of the record goes with this distribution.
 - [`gate`](.github/workflows/gate.yml) checks out the pinned commit and runs nife's own
   `script/ci-build test` there: the toolchain and QEMU that commit names, then each architecture's
   kernel and programs built and the system test suite booted under QEMU on aarch64, riscv64 and
@@ -33,6 +34,9 @@ does not know basalt exists.
 - [`pin bump`](.github/workflows/pin-bump.yml) runs daily at 06:17 UTC. If nife's `main` has moved,
   it rewrites the pin on the branch `pin/nife` and opens (or updates) one pull request, and the gate
   runs on it.
+- [`record pin bump`](.github/workflows/record-pin-bump.yml) does the same for `[record]` on the
+  branch `pin/record`, after each merge to the record's main (a dispatch the record sends) and once
+  a day. It does not arm auto-merge.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
