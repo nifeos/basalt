@@ -48,6 +48,6 @@ cflags = ["-O2", "-std=gnu99", "-DEXTRA_VERSION=\"\""]
 # Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
-aarch64 = "sha256:f3c17ca5a76662107f4c9985bc8119fbeda5c055d213fb18bc2eaa48c3d00d36"
-riscv64 = "sha256:ed844f798a37769435a47718a71a7d65c584fa2ab8198ed683d7665aab6cf080"
-x86_64 = "sha256:ccf59c3adb6ccafd5f1ab320f27abd723e245656b149699a909ee7ba6b111176"
+aarch64 = "sha256:659545b9a87ffd164820c74deedbd2329a826ce63bddc71b8b67f65cbc5afd11"
+riscv64 = "sha256:6eabee12ebbb2c9cfc9699261d6996f5922c1edd43971a4bdd72a0c5f3c28700"
+x86_64 = "sha256:c2e207db351d7bae23fd0cf27555ce23c35a2e7146da810c3fd11c0c0655799f"
