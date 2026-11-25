@@ -28,7 +28,8 @@ does not know basalt exists.
   `script/ci-build test` there: the toolchain and QEMU that commit names, then each architecture's
   kernel and programs built and the system test suite booted under QEMU on aarch64, riscv64 and
   x86_64. The test kernels and program archives are kept as the run's artifact for 14 days. Its
-  `lint` job runs `helpers/packages.py check`, ruff on `helpers/*.py` and typos on the tree.
+  `lint` job runs `helpers/packages.py check`, ruff on `helpers/*.py`, the helpers' tests
+  (`helpers/tests/`) and typos on the tree.
 - [`codeql`](.github/workflows/codeql.yml) scans the workflows and the Python helpers. Dependabot
   keeps the actions current; every action is pinned by commit SHA.
 - [`pin bump`](.github/workflows/pin-bump.yml) runs daily at 06:17 UTC. If nife's `main` has moved,
@@ -37,6 +38,16 @@ does not know basalt exists.
 - [`record pin bump`](.github/workflows/record-pin-bump.yml) does the same for `[record]` on the
   branch `pin/record`, after each merge to the record's main (a dispatch the record sends) and once
   a day. It does not arm auto-merge.
+- [`recipe bump`](.github/workflows/recipe-bump.yml) runs daily at 07:23 UTC and does for each
+  watched recipe what the pin bump does for nife (record §328). It proposes the newest upstream
+  release past a hold of 7 days (crates.io; the value is provisional) on the branch
+  `recipe/<name>`, with the source's SHA-256 from crates.io's index, a patched crate moved with the
+  new `Cargo.lock` and the patch file left as it is. It arms auto-merge only when the patch still
+  applies, the upstream's license and license files match the recipe, each new package's manifest
+  note grants no more than the served package's (tools/manifest_note_compare, built from nife's
+  own crates at the pin), and the diff is only those version and digest lines; a failed check
+  leaves the pull request open with the label `needs-maintainer`. Today it watches `ripgrep`;
+  `helpers/recipe_bump.py watched` says why each other recipe is not watched.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
   `license` as an SPDX expression and its `license_files`, and the build refuses a recipe missing
@@ -196,6 +207,13 @@ Ask the pin bump to propose something other than main's head (after it is on `ma
 
 ```sh
 gh workflow run pin-bump.yml -f commit=0123456789abcdef0123456789abcdef01234567
+```
+
+Ask the recipe bump for one recipe, or for a release other than the newest past the hold:
+
+```sh
+gh workflow run recipe-bump.yml -f recipe=ripgrep -f version=15.1.0
+helpers/recipe_bump.py plan ripgrep     # what it would propose, read-only
 ```
 
 Read the current pin:

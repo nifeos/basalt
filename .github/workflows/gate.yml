@@ -17,7 +17,7 @@
 # branches keep the cost at one runner per pin.
 #
 # A second job, `lint`, checks basalt's own files in seconds: every recipe names its license
-# (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), and typos on the tree
+# (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), the helpers' tests, and typos on the tree
 # (_typos.toml). It is one of the required checks.
 #
 # Names provisional: the file, the workflow and the jobs.
@@ -145,5 +145,7 @@ jobs:
         run: python3 helpers/packages.py check
       - name: ruff
         run: pipx run ruff==0.16.9 check helpers/
+      - name: The helpers' tests (helpers/tests)
+        run: python3 -m unittest discover -s helpers/tests
       - name: typos
         uses: crate-ci/typos@276087d9a4f06398b3e04825487805e2d7375888 # v1.52.2

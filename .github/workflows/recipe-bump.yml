@@ -1,0 +1,343 @@
+# recipe bump: propose each watched recipe's newest upstream release, and let it merge with no
+# person when the checks stand in for review (record §328, ruled option A on 2026-11-25 UTC).
+#
+# The machinery is pin-bump.yml's, and its header says why each part is the way it is: the
+# automation App's token so the pull request runs the gate by itself, `github.token` and
+# `gh workflow run` when the App's secrets are absent, a force-pushed branch so one pull request is
+# open per recipe, `--update-digests` for the package digests, and the arm step's identity checks.
+# The packages workflow then builds the bump twice (`reproduce`), installs it with jig (`install`)
+# and boots the composed images (`composed`), as for every pull request; nothing here repeats them.
+#
+# **One pull request per recipe**, on the branch `recipe/<name>`. helpers/recipe_bump.py says which
+# recipes are watched and why the others are not (`watched`), and which release is proposed: the
+# newest that is past its source's hold (7 days for crates.io, provisional), so a release still in
+# the hold does not replace a pull request that could merge. Its header has the reasoning.
+#
+# **The checks this adds**, each a verb of helpers/recipe_bump.py, each writing one result:
+#   - the patch: every `[[patch]]` file is the reviewed one (its SHA-256) and applies to the new
+#     version of its crate under `patch --dry-run`; `rewrite` moved that crate's version and digest
+#     from the new Cargo.lock and crates.io's index, and the patch file is never touched;
+#   - the license: the new source's own `license` field equals the recipe's, and each of its
+#     `license_files` is in the new source;
+#   - the endowment: tools/manifest_note_compare reads the notes of each newly built package and of
+#     the package basalt serves today, with nife's own crates at the pinned commit, and passes only
+#     when each program's notes are the same or grant a subset;
+#   - the diff: only `recipes/<name>.toml` changed, and in it only the upstream's `version` and
+#     `sha256`, each patched crate's `version` and `sha256`, and the `[package_digest]` lines.
+#
+# **The outcome.** `decide` reads the results. All hold and the release is past the hold: the run
+# arms auto-merge under the same identity checks as pin-bump.yml, and the merge publishes. A check
+# fails: the pull request stays open, auto-merge off, its body names the check, and it gets the
+# label `needs-maintainer` (basalt has no `needs-architect`). The release is younger than the hold:
+# it stays open with auto-merge off and no label, and the scheduled run that finds it aged arms it.
+# A build that fails fails this run and opens nothing; a red `packages` job is a red pull request,
+# as a red pin bump is. To hold a recipe, `gh pr merge recipe/<name> --disable-auto`, which lasts
+# until the next scheduled run (daily at 07:23 UTC); to hold longer, list it in
+# helpers/recipe_bump.py's NOT_WATCHED with its reason.
+#
+# On a pull request that touches this file, helpers/recipe_bump.py or the note tool, the job runs as
+# a dry run: it runs every step on the real newest release, builds it, compares its notes and prints
+# the decision, runs the tests of both, and pushes nothing. The identity checks need a real run on
+# main, as pin-bump.yml's do.
+#
+# Names provisional: the file, the workflow, the jobs, the branches `recipe/<name>` and the label.
+name: recipe bump
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: "one watched recipe (by file stem) instead of every watched one"
+        required: false
+        default: ""
+      version:
+        description: "a release to propose instead of the newest past the hold (needs `recipe`)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - .github/workflows/recipe-bump.yml
+      - helpers/recipe_bump.py
+      - helpers/tests/**
+      - tools/manifest_note_compare/**
+
+concurrency:
+  group: recipe-bump-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  watched:
+    name: list the watched recipes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: The decision logic's tests
+        run: python3 -m unittest discover -s helpers/tests -v
+      - name: List them, and say why each other recipe is not watched
+        id: list
+        env:
+          INPUT_RECIPE: ${{ inputs.recipe }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -e
+          all="$(helpers/recipe_bump.py watched)"
+          if [ -n "$INPUT_RECIPE" ]; then
+            echo "$all" | python3 -c 'import json, sys; sys.exit(sys.argv[1] not in json.load(sys.stdin))' \
+              "$INPUT_RECIPE" || { echo "::error::$INPUT_RECIPE is not a watched recipe"; exit 1; }
+            all="[\"$INPUT_RECIPE\"]"
+          elif [ -n "$INPUT_VERSION" ]; then
+            echo "::error::a version needs a recipe"; exit 1
+          fi
+          echo "recipes=$all" >> "$GITHUB_OUTPUT"
+
+  propose:
+    name: propose ${{ matrix.recipe }}
+    needs: watched
+    if: needs.watched.outputs.recipes != '[]'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.watched.outputs.recipes) }}
+    env:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      DRY_RUN: ${{ github.event_name == 'pull_request' }}
+      RECIPE: ${{ matrix.recipe }}
+    steps:
+      - name: Mint an installation token for the automation App
+        id: app-token
+        if: env.AUTOMATION_APP_ID != '' && env.DRY_RUN != 'true'
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Work out what to propose
+        id: plan
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -e
+          { echo "RESULTS=$RUNNER_TEMP/results.json"; echo "WORK=$RUNNER_TEMP/recipe-bump-work"; } >> "$GITHUB_ENV"
+          helpers/recipe_bump.py plan "$RECIPE" ${INPUT_VERSION:+--version "$INPUT_VERSION"} | tee -a "$GITHUB_OUTPUT"
+          eval "$(helpers/pins.py get nife | sed 's/^/pin_/')"
+          { echo "nife_slug=$pin_slug"; echo "nife_commit=$pin_commit"; } >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite the recipe for the new release
+        if: steps.plan.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA256: ${{ steps.plan.outputs.sha256 }}
+        run: |
+          helpers/recipe_bump.py rewrite "$RECIPE" "$VERSION" "$SHA256" "$WORK"
+          git diff
+
+      - name: Check the patches and the license
+        id: check
+        if: steps.plan.outputs.skip == 'false'
+        run: |
+          helpers/recipe_bump.py check "$RECIPE" "$WORK" "$RESULTS"
+          echo "patch=$(jq -r .patch.ok "$RESULTS")" >> "$GITHUB_OUTPUT"
+
+      - name: Check out nife at the pin
+        if: steps.plan.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ steps.plan.outputs.nife_slug }}
+          ref: ${{ steps.plan.outputs.nife_commit }}
+          path: nife
+          persist-credentials: false
+
+      # A patch that does not apply cannot build; the pull request then goes up held, for a person.
+      - name: Keep apt working when Ubuntu's archive does not resolve
+        if: steps.check.outputs.patch == 'true'
+        run: helpers/apt-mirror-fallback.sh
+
+      - name: Provision the toolchain the pin names
+        if: steps.check.outputs.patch == 'true'
+        working-directory: nife
+        run: script/bootstrap
+        env:
+          NIFE_SKIP_LINT_TOOLS: "1"
+
+      - name: Build the new release and record its packages' digests
+        if: steps.check.outputs.patch == 'true'
+        run: |
+          helpers/packages.py build nife repository --only "$RECIPE" --update-digests
+          git diff
+
+      # The tool is an ordinary host program, built with the runner's stable Rust, apart from the
+      # toolchain the pin names.
+      - name: Compare each new package's notes with the served package's
+        if: steps.check.outputs.patch == 'true'
+        env:
+          RUSTUP_TOOLCHAIN: stable
+          CURRENT: ${{ steps.plan.outputs.current }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -e
+          tool="$(helpers/recipe_bump.py note-tool nife | tail -1)"
+          cargo test --release --manifest-path tools/manifest_note_compare/Cargo.toml \
+            --target-dir tools/manifest_note_compare/target
+          worst=0
+          : > "$RUNNER_TEMP/note.txt"
+          for arch in aarch64 riscv64 x86_64; do
+            helpers/recipe_bump.py served "$RECIPE" "$CURRENT" "$arch" "$RUNNER_TEMP/served-$arch.nifepkg"
+            built="repository/rolling/targets/$RECIPE-$VERSION-$arch.nifepkg"
+            set +e
+            "$tool" "$RUNNER_TEMP/served-$arch.nifepkg" "$built" | sed "s/^/$arch /" >> "$RUNNER_TEMP/note.txt"
+            code="${PIPESTATUS[0]}"
+            set -e
+            if [ "$code" -gt "$worst" ]; then worst="$code"; fi
+          done
+          cat "$RUNNER_TEMP/note.txt"
+          helpers/recipe_bump.py note "$RESULTS" "$worst" "$RUNNER_TEMP/note.txt"
+
+      - name: Commit the bump, and check that the diff is only the recipe's version and digests
+        if: steps.plan.outputs.skip == 'false'
+        env:
+          CURRENT: ${{ steps.plan.outputs.current }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA256: ${{ steps.plan.outputs.sha256 }}
+          PUBLISHED: ${{ steps.plan.outputs.published }}
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "recipe/$RECIPE"
+          git add "recipes/$RECIPE.toml"
+          git commit -m "$RECIPE $VERSION
+
+          Moves $RECIPE from $CURRENT to $VERSION, proposed by the scheduled
+          recipe bump (record §328). The source's SHA-256 is the cksum in
+          crates.io's index, $SHA256,
+          published $PUBLISHED. A patched crate the new Cargo.lock moves
+          has its version and digest moved with it; the patch file is
+          unchanged. The package digests are the build's
+          (helpers/packages.py build --update-digests)."
+          helpers/recipe_bump.py confined "$RECIPE" HEAD^ HEAD "$RESULTS"
+
+      - name: Decide
+        id: decide
+        if: steps.plan.outputs.skip == 'false'
+        env:
+          ELIGIBLE: ${{ steps.plan.outputs.eligible_at }}
+        run: |
+          helpers/recipe_bump.py decide "$RESULTS" "$ELIGIBLE" | tee -a "$GITHUB_OUTPUT"
+          { echo "### $RECIPE"; echo; cat "$RESULTS"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the branch, start the gate, open or update the pull request
+        id: push
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          CURRENT: ${{ steps.plan.outputs.current }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          WAITING: ${{ steps.plan.outputs.waiting }}
+        run: |
+          set -e
+          branch="recipe/$RECIPE"
+          git push --force origin "$branch"
+          if [ -z "$APP_TOKEN" ]; then
+            gh workflow run gate.yml --ref "$branch"
+            gh workflow run packages.yml --ref "$branch"
+            echo "Started the gate and packages on $branch (a github.token push starts no workflow by itself)."
+          fi
+          title="$RECIPE $VERSION"
+          later=""
+          [ -z "$WAITING" ] || later="
+
+          A newer release, $WAITING, is inside the hold; a later run proposes it here once it has aged."
+          body="**Lane:** $branch, opened by the scheduled recipe-bump workflow (record §328).
+
+          Moves \`$RECIPE\` from $CURRENT to $VERSION: [crates.io](https://crates.io/crates/$RECIPE/$VERSION).$later
+
+          The source's SHA-256 is the \`cksum\` crates.io's index lists. A patched crate's version and
+          digest moved with the new \`Cargo.lock\`, and the patch file did not. The \`[package_digest]\`
+          lines are the build's. \`packages\` rebuilds twice and its \`reproduce\` job fails unless the
+          two are byte-identical; \`install\` and \`composed\` install the package and boot the images.
+
+          This branch is force-pushed on every scheduled run."
+          printf '%s\n' "$body" > "$RUNNER_TEMP/body.md"
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[].number')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+          elif ! gh pr create --head "$branch" --base main --title "$title" --body "$body"; then
+            echo "::error::Could not open the pull request. With github.token this needs Settings >" \
+                 "Actions > General > 'Allow GitHub Actions to create and approve pull requests'."
+            exit 1
+          fi
+          {
+            echo "pr=$(gh pr list --head "$branch" --state open --json number --jq '.[].number')"
+            echo "head=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      # pin-bump.yml's identity checks, then the decision. A hold or a wait is not a failed run.
+      - name: Arm auto-merge, or say why not
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          LABEL_TOKEN: ${{ github.token }}
+          PR: ${{ steps.push.outputs.pr }}
+          PUSHED: ${{ steps.push.outputs.head }}
+          OUTCOME: ${{ steps.decide.outputs.outcome }}
+          REASONS: ${{ steps.decide.outputs.reasons }}
+        run: |
+          set -e
+          refusals=()
+          [ "$GITHUB_REF" = refs/heads/main ] || refusals+=("this run is on $GITHUB_REF, not main")
+          IFS=$'\t' read -r login ref repo head < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+            --jq '[.user.login, .head.ref, .head.repo.full_name, .head.sha] | @tsv')
+          [ "$login" = "nife-smelter[bot]" ] || refusals+=("it was opened by $login, not nife-smelter[bot]")
+          [ "$ref" = "recipe/$RECIPE" ] && [ "$repo" = "$GITHUB_REPOSITORY" ] \
+            || refusals+=("its head is $repo:$ref, not $GITHUB_REPOSITORY:recipe/$RECIPE")
+          [ "$head" = "$PUSHED" ] || refusals+=("its head is $head, not $PUSHED, which this run pushed")
+          label() { GH_TOKEN="$LABEL_TOKEN" gh pr edit "$PR" "$@" \
+            || echo "::warning::could not change the label on #$PR"; }
+
+          if [ "$OUTCOME" = arm ] && [ ${#refusals[@]} -eq 0 ]; then
+            gh pr merge "$PR" --auto --merge --match-head-commit "$PUSHED"
+            label --remove-label needs-maintainer
+            note="**Auto-merge is armed** for \`$(printf %.9s "$PUSHED")\`: every check of record §328
+          holds, so this merges once the required checks pass, and the merge publishes.
+          $REASONS"
+          elif [ "$OUTCOME" = hold ]; then
+            gh pr merge "$PR" --disable-auto 2>/dev/null || true
+            label --add-label needs-maintainer
+            note="**Held for a person** (\`needs-maintainer\`): auto-merge is off, because:
+          $REASONS"
+          elif [ "$OUTCOME" = wait ]; then
+            gh pr merge "$PR" --disable-auto 2>/dev/null || true
+            label --remove-label needs-maintainer
+            note="**Waiting**, auto-merge off: every check holds, and
+          $REASONS
+          The scheduled run that finds it past the hold arms it."
+          else
+            gh pr merge "$PR" --disable-auto 2>/dev/null || true
+            note="**Auto-merge is not armed.** This pull request needs a person, because:
+          $(printf -- '- %s\n' "${refusals[@]}")"
+          fi
+          printf '%s\n' "$note" >> "$GITHUB_STEP_SUMMARY"
+          gh pr edit "$PR" --body "$(cat "$RUNNER_TEMP/body.md")
+
+          $note"

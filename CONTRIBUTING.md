@@ -31,6 +31,11 @@ Then run `helpers/packages.py check` and open a pull request. The `packages` wor
 recipe against nife's pin and boots nife to install them, so you do not need a nife toolchain
 locally, though `helpers/packages.py build <nife checkout> repository` works with one.
 
+A new upstream release of a watched recipe needs no pull request from you: the `recipe bump`
+workflow opens one, and it merges with no person when its checks hold (record §328). One that
+changes the license, needs a different patch or asks for more endowment is held with the label
+`needs-maintainer`, and a person reviews it as a new recipe.
+
 ## What the gates check
 
 Seven checks are required before anything merges into `main`:
@@ -41,7 +46,7 @@ Seven checks are required before anything merges into `main`:
 | jig installs them (swish-check-aarch64-riscv64) | a booted nife on aarch64 and riscv64 installs the packages with `jig` and runs them |
 | jig installs them (swish-check-x86_64) | the same on x86_64 |
 | nife at its pin (image build and system test, three architectures) | the pinned nife commit builds and passes its own system test |
-| lint (recipes, ruff, typos) | every recipe names a license and its license files, ruff is clean on `helpers/*.py`, and typos is clean on the tree |
+| lint (recipes, ruff, typos) | every recipe names a license and its license files, ruff is clean on `helpers/*.py`, the helpers' tests pass, and typos is clean on the tree |
 | boots the image it composed (composed-aarch64-riscv64) | an image composed from basalt's own base packages reaches the prompt on aarch64 and riscv64 |
 | boots the image it composed (composed-x86_64) | the same on x86_64 |
 
