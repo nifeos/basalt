@@ -1,0 +1,8 @@
+The fixture's patch: walk on one thread, as basalt's ripgrep patch does on nife.
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+ pub fn threads() -> usize {
+-    std::thread::available_parallelism().map_or(1, |n| n.get())
++    1
+ }

@@ -1,0 +1,8 @@
+The fixture's patch against a line the new release no longer has.
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+ pub fn threads() -> usize {
+-    num_cpus::get()
++    1
+ }

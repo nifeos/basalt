@@ -1,0 +1,5 @@
+# A crate as crates.io serves it, cut to what the license check reads.
+[package]
+name = "fixture"
+version = "2.0.0"
+license = "Unlicense OR MIT"
