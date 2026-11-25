@@ -1,0 +1,22 @@
+# The manifest note check of the recipe bump (helpers/recipe_bump.py): whether a newly built
+# package asks for no more than the package basalt serves today. It reads the notes with nife's own
+# crates, at the commit pins.toml names, checked out at `nife/` beside this repository's root as
+# the workflows check it out; it decodes nothing itself. Its own workspace, as nife's `jig` is, so
+# it builds for the host without nife's.
+#
+# Name provisional: the directory, the crate and the program.
+[package]
+name = "manifest_note_compare"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+capability_manifest_note = { path = "../../nife/crates/capability_manifest_note" }
+package_archive = { path = "../../nife/crates/package_archive" }
+static_elf = { path = "../../nife/crates/static_elf" }
+# The revision nife's capability_manifest_note names, so the two agree on the Manifest type.
+grant_contract = { version = "0.1.0", git = "https://github.com/partsfoundry/grant_contract", rev = "a1e5b048a9e6a26305a47663eb3c8f7e966beb12" }
