@@ -29,6 +29,10 @@
 # this run's artifacts, never another run's (publish.yml's header says the rest). It refuses to run
 # until Pages is enabled with its domain, which is calef's act (the README's "What calef must do").
 #
+# `install` and `composed` fail, rather than skip, when `build` or `reproduce` did not pass: a
+# required check whose job is skipped counts as passing, so a build that does not reproduce would
+# otherwise merge.
+#
 # Names provisional: the file, the workflow, the jobs and the artifact.
 name: packages
 
@@ -150,6 +154,8 @@ jobs:
   install:
     name: jig installs them (${{ matrix.row }})
     needs: [build, reproduce]
+    # Runs whatever its needs concluded, and fails in its first step unless both passed.
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -177,6 +183,13 @@ jobs:
             checks: rg-threads-x86_64
             combined: rg-threads-x86_64
     steps:
+      - name: build and reproduce must both have passed
+        env:
+          BUILD: ${{ needs.build.result }}
+          REPRODUCE: ${{ needs.reproduce.result }}
+        run: |
+          [ "$BUILD" = success ] && [ "$REPRODUCE" = success ] \
+            || { echo "::error::build was $BUILD and reproduce was $REPRODUCE; nothing is installed or booted"; exit 1; }
       # No job here pushes, so no checkout keeps its credential, least of all beside a release's code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -249,6 +262,8 @@ jobs:
   composed:
     name: boots the image it composed (${{ matrix.row }})
     needs: [build, reproduce]
+    # Runs whatever its needs concluded, and fails in its first step unless both passed.
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     # Three composed boots (a 180-second watch cap each) and building the base packages for two
     # architectures on one leg. `install` and `build` take 60; this builds and boots more.
@@ -266,6 +281,13 @@ jobs:
             triples: x86_64-unknown-nife
             arches: x86_64
     steps:
+      - name: build and reproduce must both have passed
+        env:
+          BUILD: ${{ needs.build.result }}
+          REPRODUCE: ${{ needs.reproduce.result }}
+        run: |
+          [ "$BUILD" = success ] && [ "$REPRODUCE" = success ] \
+            || { echo "::error::build was $BUILD and reproduce was $REPRODUCE; nothing is installed or booted"; exit 1; }
       # No job here pushes, so no checkout keeps its credential, least of all beside a release's code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
