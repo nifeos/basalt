@@ -44,9 +44,12 @@ does not know basalt exists.
   `recipe/<name>`, with the source's SHA-256 from crates.io's index, a patched crate moved with the
   new `Cargo.lock` and the patch file left as it is. It arms auto-merge only when the patch still
   applies, the upstream's license and license files match the recipe, each new package's manifest
-  note grants no more than the served package's (tools/manifest_note_compare, built from nife's
-  own crates at the pin), and the diff is only those version and digest lines; a failed check
-  leaves the pull request open with the label `needs-maintainer`. Today it watches `ripgrep`;
+  note grants no more than that of the published package main's recipe names
+  (tools/manifest_note_compare, built from nife's own crates at the pin), the release is still
+  listed and not yanked, and the diff is only those version and digest lines; a failed check
+  leaves the pull request open with the label `needs-maintainer`. The build, which runs the
+  release's code, holds no credential; a separate job checks what it uploaded with main's own
+  helpers and only then pushes and arms. Today it watches `ripgrep`;
   `helpers/recipe_bump.py watched` says why each other recipe is not watched.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
