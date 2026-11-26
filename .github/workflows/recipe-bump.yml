@@ -39,11 +39,13 @@
 #
 # **What `build` can still reach.** It restores and saves no cache, and no action in it caches.
 # A job cannot give up the runner's own cache token, though, and a hosted runner gives every step
-# sudo, so code in a release could read that token and save entries in main's cache scope, which
-# gate.yml and packages.yml restore (QEMU, and the Rust cache in the gate). This workflow cannot
-# close that; what limits it is that only watched releases build here, each past its hold, and the
-# `reproduce` job rebuilds every package on the pull request. Moving the build to a runner that
-# holds no cache token, or keeping caches out of the publishing job, would close it.
+# sudo, so code in a release could read that token and save entries in main's cache scope. Those
+# entries reach no job that can write and nothing published: no job holding a write permission or
+# `id-token` (packages' `publish`, the bump workflows' `propose`, CodeQL's upload) restores a
+# cache, and packages' `build`, which makes every published package, restores none either.
+# helpers/tests/test_workflow_caches.py fails the gate if any of them gains one. What a planted
+# entry can still touch is a read-only job's check (the QEMU the `install` and `composed` boots
+# run, the gate's Rust cache); `reproduce` still rebuilds every package with no cache.
 #
 # **The outcome.** `decide` reads the results. All hold and the release is past the hold: the run
 # arms auto-merge under the same identity checks as pin-bump.yml, and the merge publishes. A check
