@@ -1,0 +1,34 @@
+# A fixture recipe for helpers/tests/test_recipe_bump.py: the shape of recipes/ripgrep.toml, at a
+# version (0.0.1) that no real bump can reach, so a test never depends on where the live recipe is.
+# The tests read this file and never recipes/ripgrep.toml.
+#
+# Every key and the file's layout are provisional.
+
+name = "ripgrep"
+version = "0.0.1"
+# The upstream source.
+crate = "ripgrep"
+sha256 = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9"
+# The program, as the package carries it: the member `bin/rg`, so `jig install ripgrep` installs the
+# program `rg` (nife's `package_archive::PROGRAM_PREFIX`).
+program = "rg"
+# What upstream licenses it under (SPDX), and the files inside the crate the package carries as
+# `doc/<file name>`. The package also carries `doc/THIRD-PARTY-NOTICES`, the license files of the
+# crates ripgrep is built from, which helpers/packages.py writes from the locked dependency graph.
+license = "Unlicense OR MIT"
+license_files = ["COPYING", "LICENSE-MIT", "UNLICENSE"]
+
+[[patch]]
+crate = "ignore"
+version = "0.4.23"
+sha256 = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+# A path in this repository, and the SHA-256 of the file there.
+file = "patches/ripgrep-ignore-walk.patch"
+file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
+
+# Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
+# --update-digests` rewrites this table after a reviewed change.
+[package_digest]
+aarch64 = "sha256:78270b9da3e27fedaf584b79d08d2faa93cc33ac1ceba668de4e8fb4c3dd8eb9"
+riscv64 = "sha256:23e4048697c52df5e8a12f80e90a0f99bb8d4c81e9f55dc5407983e56162864b"
+x86_64 = "sha256:812e173917c9ef4dfbe619f941502218dd1f18a1ccb0c22347c99089fe8abd7a"
