@@ -461,7 +461,27 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site
+      # deploy-pages lists the run's artifacts through the Actions artifact service and fails with
+      # `No artifacts named "github-pages" were found` when that listing, read well under a second
+      # after upload-pages-artifact finalized the upload, does not show it yet (the listing then
+      # holds only `repository` and `repository-independent`; the artifact is there a moment later).
+      # So the deployment is tried up to three times, with a pause before each retry; only the last
+      # attempt may fail the job. A failed attempt created no deployment, so a retry is safe.
       - id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+      - name: Wait before the second deployment attempt
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: deployment-second
+        if: steps.deployment.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+      - name: Wait before the last deployment attempt
+        if: steps.deployment.outcome == 'failure' && steps.deployment-second.outcome == 'failure'
+        run: sleep 90
+      - id: deployment-last
+        if: steps.deployment.outcome == 'failure' && steps.deployment-second.outcome == 'failure'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
   # The index's second address, basalt.crickertech.com (nife §250 clause 6; calef, 2026-10-21 UTC:
