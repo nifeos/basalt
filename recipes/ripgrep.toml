@@ -20,10 +20,10 @@
 # Every key and the file's layout are provisional.
 
 name = "ripgrep"
-version = "14.1.1"
+version = "15.2.0"
 # The upstream source.
 crate = "ripgrep"
-sha256 = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9"
+sha256 = "a30750b6d0743bfdd2656ebbaf4555aa278c43144b84bc389bcbfa399485ec71"
 # The program, as the package carries it: the member `bin/rg`, so `jig install ripgrep` installs the
 # program `rg` (nife's `package_archive::PROGRAM_PREFIX`).
 program = "rg"
@@ -35,8 +35,8 @@ license_files = ["COPYING", "LICENSE-MIT", "UNLICENSE"]
 
 [[patch]]
 crate = "ignore"
-version = "0.4.23"
-sha256 = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+version = "0.4.29"
+sha256 = "d4ffa3a0547a138e59ddd6fa3b7c672ed47e6ad6a3cd177984ff1116aa5ba742"
 # A path in this repository, and the SHA-256 of the file there.
 file = "patches/ripgrep-ignore-walk.patch"
 file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
@@ -44,6 +44,6 @@ file_sha256 = "dd6a89d54616551f737f9d4594089726a778404843e4ee0ccaad5a6368ccf941"
 # Each package's SHA-256, checked by every build; `helpers/packages.py build <nife> <dir>
 # --update-digests` rewrites this table after a reviewed change.
 [package_digest]
-aarch64 = "sha256:7b727f4f789594ff17704d1333ea02ad687986b688f5056a05a5678948a95e90"
-riscv64 = "sha256:5c0d49a70fbbac91d6c153cf0c03f417419cd4518f13a228a4f206f565127057"
-x86_64 = "sha256:15114fd613a75a9d1843d8b1f1cc25683cdff7818a57b332dc27cdd205b74316"
+aarch64 = "sha256:ef1c14c516827ce21c3b21afdbbc400b99c024a33f2af1e183daba9c95e89d80"
+riscv64 = "sha256:28c590f49b019e9f1e4269b1806262a0a8c772ee9e92af2dde57ab73e721f40b"
+x86_64 = "sha256:4b4e65fb7fc42c03de8d772e6b1828fada6ba1d54a8f34637e16d5a4d5539c01"
