@@ -224,7 +224,8 @@ class ChoosingARelease(unittest.TestCase):
                 recipe_bump.choose("15.1.0", entries, dates, NOW, 7, wanted=wanted)
 
 
-RIPGREP_RECIPE = (FIXTURES.parent.parent.parent / "recipes" / "ripgrep.toml").read_text()
+# A fixture, never the live recipes/ripgrep.toml: a real bump moves that one, and the tests with it.
+RIPGREP_RECIPE = (FIXTURES / "ripgrep.toml").read_text()
 
 
 def quiet():
@@ -363,16 +364,16 @@ class TheBaseline(unittest.TestCase):
         self.reviewed = b"the package a person reviewed"
         self.stale = b"an older build the index still names"
         (self.tmp / "index-copy").mkdir()
-        (self.tmp / "index-copy" / "ripgrep-14.1.1-aarch64.nifepkg").write_bytes(self.stale)
+        (self.tmp / "index-copy" / "ripgrep-0.0.1-aarch64.nifepkg").write_bytes(self.stale)
         (self.tmp / "release").mkdir()
-        (self.tmp / "release" / "ripgrep-14.1.1-aarch64.nifepkg").write_bytes(self.reviewed)
+        (self.tmp / "release" / "ripgrep-0.0.1-aarch64.nifepkg").write_bytes(self.reviewed)
         digest = hashlib.sha256(self.reviewed).hexdigest()
         self.recipe = recipe_with_digests(
             RIPGREP_RECIPE, {"aarch64": digest, "riscv64": "1" * 64, "x86_64": "2" * 64}
         )
-        url = f"file://{self.tmp}/index-copy/ripgrep-14.1.1-aarch64.nifepkg"
+        url = f"file://{self.tmp}/index-copy/ripgrep-0.0.1-aarch64.nifepkg"
         stale = hashlib.sha256(self.stale).hexdigest()
-        self.index = f"ripgrep-14.1.1-aarch64 sha256:{stale} sectigo-root-e46={url}\n"
+        self.index = f"ripgrep-0.0.1-aarch64 sha256:{stale} sectigo-root-e46={url}\n"
 
     def serve(self, recipe=None):
         dest = self.tmp / "served.nifepkg"
