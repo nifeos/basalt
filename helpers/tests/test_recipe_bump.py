@@ -14,9 +14,15 @@ Name provisional.
 """
 
 import datetime
+import hashlib
+import io
 import pathlib
+import shutil
 import sys
+import tarfile
+import tempfile
 import unittest
+from unittest import mock
 
 HELPERS = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HELPERS))
@@ -43,6 +49,7 @@ def patch_entry(name):
     return {
         "crate": "dependency",
         "version": "0.2.0",
+        "sha256": "f" * 64,
         "file": str(path.relative_to(recipe_bump.BASALT)),
         "file_sha256": recipe_bump.packages.sha256(path),
     }
@@ -55,6 +62,10 @@ def passing(**overrides):
         "license": recipe_bump.license_result(RECIPE, FIXTURES / "crate"),
         "patch": recipe_bump.patch_result(patch_entry("applies.patch"), FIXTURES / "dependency"),
         "confined": {"ok": True, "why": "only the version and digest lines changed"},
+        "release": recipe_bump.release_result(
+            {"2.0.0": {"cksum": "c" * 64, "yanked": False}}, "2.0.0", "c" * 64
+        ),
+        "build": {"ok": True, "why": "every built package hashes to the digest the build recorded"},
     }
     results.update(overrides)
     return results
@@ -120,6 +131,34 @@ class TheSixCases(unittest.TestCase):
         outcome, _ = recipe_bump.decide(passing(note=note), INSIDE_HOLD, NOW)
         self.assertEqual(outcome, "hold")
 
+    def test_a_failed_patch_skips_the_note_and_holds(self):
+        """The workflow builds nothing and compares no notes when a patch fails, so `check` is the
+        last check to write a result; the decision then holds on the patch and on the note that
+        never ran, and does not wait or arm."""
+        with tempfile.TemporaryDirectory() as tmp, crate_fetches(pathlib.Path(tmp)):
+            work = pathlib.Path(tmp) / "work"
+            recipe = dict(RECIPE, version="2.0.0", patch=[patch_entry("fails.patch")])
+            shutil.copytree(FIXTURES / "crate", work / "fixture-2.0.0")
+            results = recipe_bump.check_results(recipe, work)
+        self.assertTrue(results["license"]["ok"])
+        self.assertFalse(results["patch"]["ok"])
+        outcome, reasons = recipe_bump.decide(results, INSIDE_HOLD, NOW)
+        self.assertEqual(outcome, "hold")
+        self.assertIn("endowment: the check did not run", reasons)
+        self.assertTrue(any(r.startswith("patch: ") for r in reasons), reasons)
+
+    def test_a_yanked_release_holds(self):
+        entries = {"2.0.0": {"cksum": "c" * 64, "yanked": True}}
+        release = recipe_bump.release_result(entries, "2.0.0", "c" * 64)
+        outcome, reasons = recipe_bump.decide(passing(release=release), PAST_HOLD, NOW)
+        self.assertEqual(outcome, "hold")
+        self.assertEqual(reasons, ["release: 2.0.0 has been yanked"])
+
+    def test_a_changed_cksum_holds(self):
+        entries = {"2.0.0": {"cksum": "d" * 64, "yanked": False}}
+        self.assertFalse(recipe_bump.release_result(entries, "2.0.0", "c" * 64)["ok"])
+        self.assertFalse(recipe_bump.release_result(entries, "2.1.0", "c" * 64)["ok"])
+
     def test_a_check_that_did_not_run_holds(self):
         results = passing()
         del results["note"]
@@ -171,8 +210,53 @@ class ChoosingARelease(unittest.TestCase):
         entries, dates = ripgrep_releases()
         self.assertIsNone(recipe_bump.choose("16.0.0", entries, dates, NOW, 7))
 
+    def test_a_wanted_release_is_proposed_and_waits_its_hold(self):
+        entries, dates = ripgrep_releases()
+        chosen = recipe_bump.choose("14.1.1", entries, dates, NOW, 7, wanted="16.0.0")
+        self.assertEqual(chosen["version"], "16.0.0")
+        eligible = datetime.datetime.fromisoformat(chosen["eligible_at"])
+        self.assertEqual(recipe_bump.decide(passing(), eligible, NOW)[0], "wait")
+
+    def test_a_wanted_release_is_refused_unless_a_newer_plain_listed_one(self):
+        entries, dates = ripgrep_releases()
+        for wanted in ("17.0.0-rc.1", "14.1.1", "15.0.0", "15.3.0", "99.0.0"):
+            with self.subTest(wanted=wanted), quiet(), self.assertRaises(SystemExit):
+                recipe_bump.choose("15.1.0", entries, dates, NOW, 7, wanted=wanted)
+
 
 RIPGREP_RECIPE = (FIXTURES.parent.parent.parent / "recipes" / "ripgrep.toml").read_text()
+
+
+def quiet():
+    return mock.patch("sys.stderr", io.StringIO())
+
+
+def crate_file(directory, top):
+    """A `.crate` (a gzipped tar with one top directory) of `directory`'s files under `top`."""
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w:gz") as t:
+        t.add(directory, arcname=top)
+    return out.getvalue()
+
+
+def crate_fetches(work_root, crates=None):
+    """Stand in for crates.io: `packages.fetch_crate` writes the `.crate` made from `crates`
+    ({(crate, version): directory}, the fixture dependency by default) and checks its digest."""
+    crates = crates or {("dependency", "0.2.0"): FIXTURES / "dependency"}
+
+    def fetch_crate(crate, version, want, work):
+        data = crate_file(crates[(crate, version)], f"{crate}-{version}")
+        path = pathlib.Path(work) / f"{crate}-{version}.crate"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        if want is not None and hashlib.sha256(data).hexdigest() != want:
+            raise SystemExit(f"{crate} {version} does not hash to {want}")
+        return path
+
+    def fetch_crate_any_digest(crate, version, want, work):
+        return fetch_crate(crate, version, None, work)
+
+    return mock.patch.object(recipe_bump.packages, "fetch_crate", fetch_crate_any_digest)
 
 
 class RewritingAndTheDiffGuard(unittest.TestCase):
@@ -211,6 +295,140 @@ class RewritingAndTheDiffGuard(unittest.TestCase):
                 self.assertTrue(
                     recipe_bump.confined_refusals("ripgrep", changed, RIPGREP_RECIPE, text)
                 )
+
+
+
+LOCK = """version = 4
+
+[[package]]
+name = "ignore"
+version = "0.4.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "{checksum}"
+
+[[package]]
+name = "ripgrep"
+version = "15.2.0"
+"""
+
+
+class TheRewrite(unittest.TestCase):
+    """`rewrite_file` end to end, with crates.io stood in for: the new release's Cargo.lock moves
+    the patched crate, whose digest must also be the one crates.io's index lists."""
+
+    def rewritten(self, index_cksum, lock_checksum="b" * 64):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            release = tmp / "release"
+            release.mkdir()
+            (release / "Cargo.lock").write_text(LOCK.format(checksum=lock_checksum))
+            recipe = tmp / "ripgrep.toml"
+            recipe.write_text(RIPGREP_RECIPE)
+            entries = {"0.4.29": {"cksum": index_cksum, "yanked": False}}
+            crates = {("ripgrep", "15.2.0"): release}
+            with (
+                crate_fetches(tmp, crates),
+                mock.patch.object(recipe_bump, "index_entries", lambda crate: entries),
+                mock.patch("sys.stdout", io.StringIO()),
+            ):
+                recipe_bump.rewrite_file(recipe, "15.2.0", "a" * 64, tmp / "work")
+            return recipe.read_text()
+
+    def test_the_lockfile_moves_the_patched_crate(self):
+        expected = recipe_bump.rewrite_text(
+            RIPGREP_RECIPE, "15.2.0", "a" * 64, {"ignore": ("0.4.29", "b" * 64)}
+        )
+        self.assertEqual(self.rewritten("b" * 64), expected)
+        self.assertIn('file_sha256 = "dd6a89d5', expected)
+
+    def test_a_lockfile_checksum_the_index_does_not_list_is_refused(self):
+        with quiet(), self.assertRaises(SystemExit):
+            self.rewritten("e" * 64)
+
+
+def recipe_with_digests(text, digests):
+    head, found, _ = text.partition("\n[package_digest]\n")
+    assert found, "the recipe ends with its [package_digest] table"
+    lines = "".join(f'{arch} = "sha256:{digest}"\n' for arch, digest in digests.items())
+    return f"{head}\n[package_digest]\n{lines}"
+
+
+class TheBaseline(unittest.TestCase):
+    """`served`: the note comparison's baseline is the package main's recipe names, by its
+    `[package_digest]`, wherever a published copy of it is found."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.reviewed = b"the package a person reviewed"
+        self.stale = b"an older build the index still names"
+        (self.tmp / "index-copy").mkdir()
+        (self.tmp / "index-copy" / "ripgrep-14.1.1-aarch64.nifepkg").write_bytes(self.stale)
+        (self.tmp / "release").mkdir()
+        (self.tmp / "release" / "ripgrep-14.1.1-aarch64.nifepkg").write_bytes(self.reviewed)
+        digest = hashlib.sha256(self.reviewed).hexdigest()
+        self.recipe = recipe_with_digests(
+            RIPGREP_RECIPE, {"aarch64": digest, "riscv64": "1" * 64, "x86_64": "2" * 64}
+        )
+        url = f"file://{self.tmp}/index-copy/ripgrep-14.1.1-aarch64.nifepkg"
+        stale = hashlib.sha256(self.stale).hexdigest()
+        self.index = f"ripgrep-14.1.1-aarch64 sha256:{stale} sectigo-root-e46={url}\n"
+
+    def serve(self, recipe=None):
+        dest = self.tmp / "served.nifepkg"
+        with (
+            mock.patch.object(recipe_bump, "git", lambda *args: recipe or self.recipe),
+            mock.patch.object(recipe_bump, "get", lambda url: self.index.encode()),
+            mock.patch.object(recipe_bump, "LATEST_RELEASE", f"file://{self.tmp}/release"),
+            mock.patch("sys.stdout", io.StringIO()),
+            quiet(),
+        ):
+            recipe_bump.served("ripgrep", "aarch64", dest, rev="main")
+        return dest.read_bytes()
+
+    def test_the_reviewed_package_is_taken_over_the_index_copy(self):
+        self.assertEqual(self.serve(), self.reviewed)
+
+    def test_no_copy_hashing_to_the_recipe_digest_is_refused(self):
+        recipe = recipe_with_digests(
+            RIPGREP_RECIPE, {"aarch64": "3" * 64, "riscv64": "1" * 64, "x86_64": "2" * 64}
+        )
+        with self.assertRaises(SystemExit):
+            self.serve(recipe)
+
+
+class AdoptingTheBuild(unittest.TestCase):
+    """`adopt_refusals`: the privileged job takes only the build's package digests, and only when
+    each uploaded package hashes to them."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.own = recipe_bump.rewrite_text(
+            RIPGREP_RECIPE, "15.2.0", "a" * 64, {"ignore": ("0.4.29", "b" * 64)}
+        )
+        targets = self.tmp / "repository" / "rolling" / "targets"
+        targets.mkdir(parents=True)
+        digests = {}
+        for arch in recipe_bump.ARCHES:
+            data = f"rg for {arch}".encode()
+            (targets / f"ripgrep-15.2.0-{arch}.nifepkg").write_bytes(data)
+            digests[arch] = hashlib.sha256(data).hexdigest()
+        self.built = recipe_with_digests(self.own, digests)
+
+    def test_matching_packages_are_adopted(self):
+        self.assertEqual(recipe_bump.adopt_refusals(self.own, self.built, self.tmp), [])
+
+    def test_a_package_that_does_not_match_is_refused(self):
+        path = self.tmp / "repository" / "rolling" / "targets" / "ripgrep-15.2.0-x86_64.nifepkg"
+        path.write_bytes(b"something else")
+        refusals = recipe_bump.adopt_refusals(self.own, self.built, self.tmp)
+        self.assertEqual(len(refusals), 1, refusals)
+
+    def test_a_build_recipe_changed_elsewhere_is_refused(self):
+        built = self.built.replace('program = "rg"', 'program = "sh"')
+        refusals = recipe_bump.adopt_refusals(self.own, built, self.tmp)
+        self.assertEqual(len(refusals), 1, refusals)
 
 
 if __name__ == "__main__":

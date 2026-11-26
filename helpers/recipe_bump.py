@@ -10,7 +10,9 @@ Usage:
     helpers/recipe_bump.py plan <recipe> [--version V]      KEY=VALUE lines: what to propose
     helpers/recipe_bump.py rewrite <recipe> <version> <sha256> <work>
     helpers/recipe_bump.py check <recipe> <work> <results.json>
-    helpers/recipe_bump.py served <recipe> <version> <arch> <dest>   what basalt serves today
+    helpers/recipe_bump.py served <recipe> <arch> <dest> [--rev R]    the package R's recipe names
+    helpers/recipe_bump.py adopt <recipe> <built-dir> <results.json>
+    helpers/recipe_bump.py release <recipe> <version> <sha256> <results.json>
     helpers/recipe_bump.py note-tool <nife-checkout>        build the note comparison, print its path
     helpers/recipe_bump.py note <results.json> <exit> <output-file>
     helpers/recipe_bump.py confined <recipe> <base> <head> <results.json>
@@ -33,10 +35,19 @@ the recipe patches, `rewrite` moves that `[[patch]]` entry's `version` and `sha2
 read from crates.io's index and checked against the lockfile's checksum, and leaves `file` and
 `file_sha256` alone. `check` then dry-runs the unchanged patch against the new version.
 
+**Two jobs, and which one trusts what.** Building a release runs its code (build scripts and
+procedural macros), so the workflow builds in a job that holds no credential, and a second job with
+the App's token believes none of its output. That job runs this file from main: it rewrites the
+recipe itself, reruns the patch and license checks, reads the build's recipe only for its
+`[package_digest]` lines and checks each built package against them (`adopt`), compares the notes
+against the package main's own recipe names (`served`), rechecks the release in crates.io's index
+(`release`), and only then commits, pushes and decides.
+
 **The decision.** `decide` reads the results the other verbs wrote and prints `outcome=arm`, `hold`
 or `wait`, with one `reason=` line per reason. `hold` means a person must look: the endowment widened
-or could not be compared, the license changed, a patch no longer applies, or the diff is not a
-recipe bump. `wait` means the release is younger than the hold and nothing else is wrong. Anything
+or could not be compared, the license changed, a patch no longer applies, the diff is not a
+recipe bump, the built packages are not the ones the build's recipe names, or the release was yanked
+or changed in crates.io's index. `wait` means the release is younger than the hold and nothing else is wrong. Anything
 else that fails (the build, the reproduce, install and composed jobs) is a red pull request, as a
 red pin bump is, and needs no label.
 
@@ -45,6 +56,7 @@ Names provisional: this file, its verbs, the results keys, HOLD_DAYS and the bra
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -89,8 +101,12 @@ NOT_WATCHED = {
 # check, so it is `needs-maintainer`. Provisional.
 LABEL = "needs-maintainer"
 
-# The served index: the packages basalt publishes today, and where each one is.
+# The served index: the packages basalt publishes today, and where each one is. The newest Release
+# is tried after it, since the index can trail main's recipe for a while after a publish.
 SERVED_INDEX = "https://basalt.nifeos.org/rolling/metadata/stand-in-index"
+LATEST_RELEASE = "https://github.com/nifeos/basalt/releases/latest/download"
+
+ARCHES = ("aarch64", "riscv64", "x86_64")
 
 NOTE_TOOL = BASALT / "tools" / "manifest_note_compare"
 
@@ -190,8 +206,14 @@ def choose(current, entries, dates, now, hold_days, wanted=None):
     )
     hold = datetime.timedelta(days=hold_days)
     if wanted is not None:
-        if wanted not in entries or entries[wanted]["yanked"]:
-            fail(f"{wanted} is not a release crates.io's index lists, or it is yanked")
+        if wanted not in entries or wanted not in dates:
+            fail(f"{wanted} is not a release crates.io lists for this crate")
+        if entries[wanted]["yanked"]:
+            fail(f"{wanted} is yanked")
+        if release_key(wanted) is None:
+            fail(f"{wanted} is a pre-release, or not a plain x.y.z version")
+        if not floor or release_key(wanted) <= floor:
+            fail(f"{wanted} is not newer than the recipe's {current}")
         candidates = [wanted]
     else:
         candidates = [v for v in newer if dates[v] + hold <= now] or newer[-1:]
@@ -299,7 +321,12 @@ def unpacked(recipe, version, sha256, work):
 
 
 def rewrite(name, version, sha256, work):
-    path = recipe_path(name)
+    rewrite_file(recipe_path(name), version, sha256, work)
+
+
+def rewrite_file(path, version, sha256, work):
+    """Rewrite the recipe at `path` for `version`, whose `.crate` must hash to `sha256`."""
+    name = path.stem
     recipe = tomllib.loads(path.read_text())
     src = unpacked(recipe, version, sha256, work)
     lock = src / "Cargo.lock"
@@ -362,7 +389,16 @@ def license_result(recipe, src):
 
 def check(name, work, results_file):
     """The patch and license checks against the source `rewrite` unpacked, into the results."""
-    recipe = load(name)
+    results = load_results(results_file)
+    results.update(check_results(load(name), work))
+    save(results_file, results)
+    for key in ("license", "patch"):
+        value = results[key]
+        print(f"recipe_bump: {key}: {'passes' if value['ok'] else 'holds'}: {value['why']}")
+
+
+def check_results(recipe, work):
+    """{"license": ..., "patch": ...} for a recipe already rewritten, against `work`."""
     src = work / f"{recipe['crate']}-{recipe['version']}"
     results = {"license": license_result(recipe, src), "patch": {"ok": True, "why": "no patches"}}
     for patch in recipe.get("patch", []):
@@ -372,23 +408,146 @@ def check(name, work, results_file):
         result = patch_result(patch, work / "patched" / f"{patch['crate']}-{patch['version']}")
         if not result["ok"] or results["patch"]["why"] == "no patches":
             results["patch"] = result
-    save(results_file, results)
-    for key, value in results.items():
-        print(f"recipe_bump: {key}: {'passes' if value['ok'] else 'holds'}: {value['why']}")
+    return results
 
 
-def served(name, version, arch, dest):
-    """The package basalt serves today for this recipe at `version` (the one being replaced) and
-    architecture, refused unless it hashes to the served index's digest."""
-    stem = f"{load(name)['name']}-{version}-{arch}"
-    for line in get(SERVED_INDEX).decode().splitlines():
+# --- the baseline: the package main's recipe names --------------------------------------------
+
+
+def baseline(recipe_text, arch):
+    """(stem, digest) of the package a recipe's text names for `arch`, from its own
+    `[package_digest]`: the bytes a person reviewed, not whatever an index says today."""
+    recipe = tomllib.loads(recipe_text)
+    digest = recipe.get("package_digest", {}).get(arch, "")
+    if not digest.startswith("sha256:"):
+        fail(f"{recipe['name']}'s recipe records no package digest for {arch}")
+    return f"{recipe['name']}-{recipe['version']}-{arch}", digest.removeprefix("sha256:")
+
+
+def served_urls(stem, index_text):
+    """Where a published copy of `stem` may be: what the served index says, then the newest
+    Release."""
+    urls = []
+    for line in index_text.splitlines():
         words = line.split(" ")
-        if words[0] == stem and len(words) == 3:
-            url = words[2].split("=", 1)[1]
-            packages.fetch(url, pathlib.Path(dest), words[1].removeprefix("sha256:"))
-            print(f"recipe_bump: {stem} is served from {url}")
-            return
-    fail(f"the served index lists no {stem}")
+        if words[0] == stem and len(words) == 3 and "=" in words[2]:
+            urls.append(words[2].split("=", 1)[1])
+    return urls + [f"{LATEST_RELEASE}/{stem}.nifepkg"]
+
+
+def read_url(url):
+    if url.startswith("file://"):
+        return pathlib.Path(url[len("file://") :]).read_bytes()
+    return get(url)
+
+
+def fetch_matching(urls, dest, want):
+    """The first of `urls` whose bytes hash to `want`, written to `dest`; None when none do."""
+    for url in urls:
+        try:
+            data = read_url(url)
+        except OSError as error:
+            print(f"recipe_bump: {url}: {error}", file=sys.stderr)
+            continue
+        if hashlib.sha256(data).hexdigest() == want:
+            pathlib.Path(dest).write_bytes(data)
+            return url
+        print(f"recipe_bump: {url} does not hash to {want}", file=sys.stderr)
+    return None
+
+
+def served(name, arch, dest, rev="HEAD"):
+    """The published package that the recipe at `rev` names for `arch`, refused unless it hashes
+    to that recipe's `[package_digest]`."""
+    stem, want = baseline(git("show", f"{rev}:recipes/{name}.toml"), arch)
+    try:
+        index_text = get(SERVED_INDEX).decode()
+    except OSError as error:
+        print(f"recipe_bump: {SERVED_INDEX}: {error}", file=sys.stderr)
+        index_text = ""
+    url = fetch_matching(served_urls(stem, index_text), dest, want)
+    if url is None:
+        fail(f"no published {stem} hashes to {rev}'s package digest {want}")
+    print(f"recipe_bump: {stem} is published at {url}, as {rev}'s recipe names it")
+
+
+# --- the build's output, believed only as far as it is checked ----------------------------------
+
+
+def built_package(built_dir, stem):
+    return pathlib.Path(built_dir) / "repository" / packages.CHANNEL / "targets" / f"{stem}.nifepkg"
+
+
+def adopt_refusals(own_text, built_text, built_dir):
+    """Why the build's recipe and packages cannot be taken, as messages; empty when they can.
+
+    The build's recipe must equal the one this job rewrote outside `[package_digest]`, and each
+    architecture's built package must hash to the digest it records there."""
+    def outside(text):
+        return [part for part in sections(text) if part[0] != "[package_digest]"]
+
+    refusals = []
+    if outside(own_text) != outside(built_text):
+        refusals.append("the build's recipe differs from this job's rewrite outside [package_digest]")
+    try:
+        recipe = tomllib.loads(built_text)
+    except tomllib.TOMLDecodeError as error:
+        return refusals + [f"the build's recipe is not valid TOML ({error})"]
+    digests = recipe.get("package_digest", {})
+    if sorted(digests) != sorted(ARCHES):
+        refusals.append(f"the build's recipe records digests for {sorted(digests)}, not {list(ARCHES)}")
+    for arch in ARCHES:
+        stem = f"{recipe.get('name')}-{recipe.get('version')}-{arch}"
+        path = built_package(built_dir, stem)
+        want = digests.get(arch, "").removeprefix("sha256:")
+        if not path.is_file():
+            refusals.append(f"the build uploaded no {stem}")
+        elif packages.sha256(path) != want:
+            refusals.append(f"{stem} does not hash to the build's recorded digest {want}")
+    return refusals
+
+
+def adopt(name, built_dir, results_file):
+    """Take the build's `[package_digest]` into this job's recipe once `adopt_refusals` is empty."""
+    path = recipe_path(name)
+    built = pathlib.Path(built_dir) / "recipes" / f"{name}.toml"
+    results = load_results(results_file)
+    if not built.is_file():
+        results["build"] = {"ok": False, "why": "nothing was built"}
+    else:
+        refusals = adopt_refusals(path.read_text(), built.read_text(), built_dir)
+        if refusals:
+            results["build"] = {"ok": False, "why": "; ".join(refusals)}
+        else:
+            path.write_text(built.read_text())
+            results["build"] = {
+                "ok": True,
+                "why": "every built package hashes to the digest the build recorded",
+            }
+    save(results_file, results)
+    print(f"recipe_bump: build: {'passes' if results['build']['ok'] else 'holds'}: {results['build']['why']}")
+
+
+def release_result(entries, version, sha256):
+    """Whether crates.io's index still lists `version`, not yanked, with the same cksum."""
+    entry = entries.get(version)
+    if entry is None:
+        return {"ok": False, "why": f"crates.io's index no longer lists {version}"}
+    if entry["yanked"]:
+        return {"ok": False, "why": f"{version} has been yanked"}
+    if entry["cksum"] != sha256:
+        return {"ok": False, "why": f"{version}'s cksum is now {entry['cksum']}, not {sha256}"}
+    return {"ok": True, "why": f"{version} is listed, not yanked, with the cksum proposed"}
+
+
+def release(name, version, sha256, results_file):
+    """Recheck the release in crates.io's index, into the results; exit 1 when it fails."""
+    results = load_results(results_file)
+    results["release"] = release_result(index_entries(load(name)["crate"]), version, sha256)
+    save(results_file, results)
+    print(f"recipe_bump: release: {'passes' if results['release']['ok'] else 'holds'}: {results['release']['why']}")
+    if not results["release"]["ok"]:
+        sys.exit(1)
 
 
 def note_tool(nife):
@@ -510,11 +669,15 @@ def confined(name, base, head, results_file):
 
 # --- the decision --------------------------------------------------------------------------------
 
-# The checks whose failure asks a person (§328, clause 3), and how each is named in a reason.
+# The checks whose failure asks a person, and how each is named in a reason: §328 clause 3's three
+# (endowment, license, patch), and three more that mean the proposal is not the one this file made
+# (the diff, the build's output, the release in crates.io's index).
 HOLDING = {
+    "release": "release",
     "note": "endowment",
     "license": "license",
     "patch": "patch",
+    "build": "build",
     "confined": "recipe-only diff",
 }
 
@@ -585,8 +748,15 @@ def main():
     c.add_argument("work", type=pathlib.Path)
     c.add_argument("results")
     s = sub.add_parser("served")
-    for arg in ("recipe", "version", "arch", "dest"):
+    for arg in ("recipe", "arch", "dest"):
         s.add_argument(arg)
+    s.add_argument("--rev", default="HEAD")
+    o = sub.add_parser("adopt")
+    for arg in ("recipe", "built", "results"):
+        o.add_argument(arg)
+    e = sub.add_parser("release")
+    for arg in ("recipe", "version", "sha256", "results"):
+        e.add_argument(arg)
     t = sub.add_parser("note-tool")
     t.add_argument("nife")
     n = sub.add_parser("note")
@@ -608,7 +778,11 @@ def main():
     elif a.verb == "check":
         check(a.recipe, a.work, a.results)
     elif a.verb == "served":
-        served(a.recipe, a.version, a.arch, a.dest)
+        served(a.recipe, a.arch, a.dest, a.rev)
+    elif a.verb == "adopt":
+        adopt(a.recipe, a.built, a.results)
+    elif a.verb == "release":
+        release(a.recipe, a.version, a.sha256, a.results)
     elif a.verb == "note-tool":
         note_tool(a.nife)
     elif a.verb == "note":
