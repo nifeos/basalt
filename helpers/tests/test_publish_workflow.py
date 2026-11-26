@@ -6,8 +6,8 @@ replace any artifact of that run, including one a later job of the same run uplo
 downloads. So nothing in packages.yml publishes: publish.yml, a separate run started by
 `workflow_run`, verifies the packages run's artifact against main, deploys, and backs up. These
 tests read the workflows as text, as test_workflow_caches.py does, and fail if that shape is lost.
-They also hold `install` and `composed` to failing, not skipping, when `reproduce` fails, since a
-skipped required check counts as passing.
+They also hold `reproduce` to failing, not skipping, when `build` fails, and `install` and
+`composed` when `reproduce` fails, since a skipped required check counts as passing.
 
 Name provisional.
 """
@@ -127,6 +127,16 @@ class ThePublishRun(unittest.TestCase):
 
 
 class AFailedReproduceFailsTheRequiredChecks(unittest.TestCase):
+    def test_reproduce_fails_rather_than_skips(self):
+        block = job(PACKAGES, "reproduce")
+        text = "\n".join(block)
+        self.assertIn("needs: build", text)
+        self.assertIn("if: ${{ !cancelled() }}", text)
+        first = "\n".join(steps(block)[0])
+        self.assertIn("needs.build.result", first)
+        self.assertIn('[ "$BUILD" = success ]', first)
+        self.assertIn("exit 1", first)
+
     def test_install_and_composed_fail_rather_than_skip(self):
         for name in ["install", "composed"]:
             block = job(PACKAGES, name)

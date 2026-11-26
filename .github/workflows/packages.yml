@@ -29,9 +29,9 @@
 # this run's artifacts, never another run's (publish.yml's header says the rest). It refuses to run
 # until Pages is enabled with its domain, which is calef's act (the README's "What calef must do").
 #
-# `install` and `composed` fail, rather than skip, when `build` or `reproduce` did not pass: a
-# required check whose job is skipped counts as passing, so a build that does not reproduce would
-# otherwise merge.
+# `reproduce` fails, rather than skips, when `build` did not pass, and `install` and `composed`
+# when `build` or `reproduce` did not pass: a check whose job is skipped counts as passing, so a
+# build that fails or does not reproduce would otherwise merge.
 #
 # Names provisional: the file, the workflow, the jobs and the artifact.
 name: packages
@@ -135,9 +135,16 @@ jobs:
   reproduce:
     name: the two builds are byte-identical
     needs: build
+    # Runs whatever build concluded, and fails in its first step unless it passed.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: build must have passed
+        env:
+          BUILD: ${{ needs.build.result }}
+        run: |
+          [ "$BUILD" = success ] || { echo "::error::build was $BUILD; there is nothing to compare"; exit 1; }
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: repository
