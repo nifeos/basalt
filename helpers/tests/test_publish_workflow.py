@@ -83,6 +83,13 @@ class ThePublishRun(unittest.TestCase):
                     self.assertIn("persist-credentials: false", text, name)
         self.assertNotRegex(PUBLISH, r"ref:\s*\$\{\{\s*github\.event\.workflow_run")
 
+    def test_only_a_qualifying_publish_enters_the_concurrency_group(self):
+        top = PUBLISH.split("\njobs:", 1)[0]
+        self.assertNotRegex(top, r"(?m)^concurrency:")
+        text = "\n".join(job(PUBLISH, "publish"))
+        self.assertLess(text.index("if: >-"), text.index("concurrency:"))
+        self.assertRegex(text, r"concurrency:\n\s+group: publish\n\s+cancel-in-progress: false")
+
     def test_publish_checks_main_is_the_commit_built(self):
         text = "\n".join(job(PUBLISH, "publish"))
         self.assertIn('[ "$head" != "$BUILT" ]', text)

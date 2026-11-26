@@ -31,9 +31,10 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: publish
-  cancel-in-progress: false
+# No workflow-level concurrency: every completed `packages` run starts this workflow, a pull
+# request's and a merge queue's as well, and a run in a group cancels the group's older pending run
+# even when its own job is then skipped. So a no-op run could silently cancel the pending publish of
+# a main commit. The group is on the `publish` job, which enters it only when its `if:` holds.
 
 jobs:
   publish:
@@ -44,6 +45,10 @@ jobs:
       && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
       && github.event.workflow_run.repository.full_name == github.repository
       && github.event.workflow_run.head_repository.full_name == github.repository
+    # One publish at a time, never cancelled once it runs.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
