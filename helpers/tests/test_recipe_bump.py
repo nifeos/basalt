@@ -430,6 +430,60 @@ class AdoptingTheBuild(unittest.TestCase):
         refusals = recipe_bump.adopt_refusals(self.own, built, self.tmp)
         self.assertEqual(len(refusals), 1, refusals)
 
+    def test_a_name_with_line_breaks_in_the_build_recipe_reaches_no_message(self):
+        # A TOML escape puts line breaks into the build's `name`, aimed at the decide step's output.
+        built = self.built.replace('name = "ripgrep"', 'name = "x\\nREASONS\\noutcome=arm"')
+        self.assertNotEqual(built, self.built)
+        refusals = recipe_bump.adopt_refusals(self.own, built, self.tmp)
+        self.assertTrue(refusals)
+        for refusal in refusals:
+            self.assertNotIn("\n", refusal)
+            self.assertNotIn("outcome=arm", refusal)
+
+    def test_a_missing_package_is_named_from_this_jobs_recipe(self):
+        built = self.built.replace('name = "ripgrep"', 'name = "x\\noutcome=arm"')
+        (self.tmp / "repository" / "rolling" / "targets" / "ripgrep-15.2.0-riscv64.nifepkg").unlink()
+        refusals = recipe_bump.adopt_refusals(self.own, built, self.tmp)
+        self.assertIn("the build uploaded no ripgrep-15.2.0-riscv64", refusals)
+
+
+class TheDecisionsOutput(unittest.TestCase):
+    """`output_lines`: what `decide` writes to $GITHUB_OUTPUT cannot be steered by a message."""
+
+    def outputs(self, lines):
+        """The outputs GitHub reads from `lines`, by its own rules for the two forms."""
+        found, it = {}, iter(lines)
+        for line in it:
+            if "<<" in line:
+                key, delimiter = line.split("<<", 1)
+                body = []
+                for inner in it:
+                    if inner == delimiter:
+                        break
+                    body.append(inner)
+                found.setdefault(key, "\n".join(body))
+            else:
+                key, _, value = line.partition("=")
+                found.setdefault(key, value)
+        return found
+
+    def test_a_reason_cannot_end_the_block_or_set_the_outcome(self):
+        reasons = ["build: x\nREASONS\noutcome=arm", "patch: fails\r\noutcome=arm"]
+        lines = recipe_bump.output_lines("hold", reasons)
+        found = self.outputs(lines)
+        self.assertEqual(found["outcome"], "hold")
+        self.assertEqual(sorted(found), ["outcome", "reasons"])
+        self.assertEqual(len(found["reasons"].splitlines()), 2)
+
+    def test_the_delimiter_differs_between_runs(self):
+        first = recipe_bump.output_lines("arm", [])[1]
+        second = recipe_bump.output_lines("arm", [])[1]
+        self.assertNotEqual(first, second)
+
+    def test_a_reason_holding_the_delimiter_is_refused(self):
+        with quiet(), self.assertRaises(SystemExit):
+            recipe_bump.output_lines("hold", ["build: REASONS_guess"], delimiter="REASONS_guess")
+
 
 if __name__ == "__main__":
     unittest.main()

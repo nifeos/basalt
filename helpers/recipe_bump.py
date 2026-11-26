@@ -61,6 +61,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import subprocess
 import sys
 import tarfile
@@ -482,7 +483,9 @@ def adopt_refusals(own_text, built_text, built_dir):
     """Why the build's recipe and packages cannot be taken, as messages; empty when they can.
 
     The build's recipe must equal the one this job rewrote outside `[package_digest]`, and each
-    architecture's built package must hash to the digest it records there."""
+    architecture's built package must hash to the digest it records there. Every name in a message
+    is this job's own: the build's recipe is believed for its digests only, and only once they
+    match, so a name it carries never reaches a message."""
     def outside(text):
         return [part for part in sections(text) if part[0] != "[package_digest]"]
 
@@ -491,19 +494,23 @@ def adopt_refusals(own_text, built_text, built_dir):
         refusals.append("the build's recipe differs from this job's rewrite outside [package_digest]")
     try:
         recipe = tomllib.loads(built_text)
-    except tomllib.TOMLDecodeError as error:
-        return refusals + [f"the build's recipe is not valid TOML ({error})"]
+    except tomllib.TOMLDecodeError:
+        return refusals + ["the build's recipe is not valid TOML"]
     digests = recipe.get("package_digest", {})
-    if sorted(digests) != sorted(ARCHES):
-        refusals.append(f"the build's recipe records digests for {sorted(digests)}, not {list(ARCHES)}")
+    if not isinstance(digests, dict) or sorted(digests) != sorted(ARCHES):
+        refusals.append(f"the build's recipe does not record one digest for each of {list(ARCHES)}")
+        digests = {}
+    own = tomllib.loads(own_text)
     for arch in ARCHES:
-        stem = f"{recipe.get('name')}-{recipe.get('version')}-{arch}"
+        stem = f"{own['name']}-{own['version']}-{arch}"
         path = built_package(built_dir, stem)
-        want = digests.get(arch, "").removeprefix("sha256:")
+        want = digests.get(arch)
         if not path.is_file():
             refusals.append(f"the build uploaded no {stem}")
-        elif packages.sha256(path) != want:
-            refusals.append(f"{stem} does not hash to the build's recorded digest {want}")
+        elif not isinstance(want, str) or not packages.DIGEST.fullmatch(want):
+            refusals.append(f"the build's recipe records no well-formed digest for {stem}")
+        elif f"sha256:{packages.sha256(path)}" != want:
+            refusals.append(f"{stem} does not hash to the build's recorded digest")
     return refusals
 
 
@@ -700,15 +707,27 @@ def decide(results, eligible_at, now):
     return "arm", [f"{label}: {results[key]['why']}" for key, label in HOLDING.items()]
 
 
+def output_lines(outcome, reasons, delimiter=None):
+    """`decide`'s step output, as lines for $GITHUB_OUTPUT.
+
+    The reasons go in GitHub's multi-line form under a delimiter drawn at random for this run, so
+    no text a check reports can end the block early and set an output of its own. A reason is
+    folded onto one line, and one that holds the delimiter is refused outright."""
+    delimiter = delimiter or f"REASONS_{secrets.token_hex(16)}"
+    lines = [f"outcome={outcome}", f"reasons<<{delimiter}"]
+    for reason in reasons:
+        reason = " ".join(reason.split())
+        if delimiter in reason:
+            fail("a check's message holds the output delimiter; refusing to write any output")
+        lines.append(f"- {reason}")
+    lines.append(delimiter)
+    return lines
+
+
 def decide_command(results_file, eligible_at, now=None):
     now = now or datetime.datetime.now(datetime.UTC)
     outcome, reasons = decide(load_results(results_file), parse_time(eligible_at), now)
-    print(f"outcome={outcome}")
-    # One reason per line, in GitHub's multi-line output form.
-    print("reasons<<REASONS")
-    for reason in reasons:
-        print(f"- {reason}")
-    print("REASONS")
+    print("\n".join(output_lines(outcome, reasons)))
 
 
 def load_results(path):
