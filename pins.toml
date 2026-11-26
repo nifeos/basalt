@@ -18,7 +18,7 @@
 
 [nife]
 repository = "https://github.com/nifeos/nife"
-commit = "6bed505665eaedc1147d59b49085ea1c181ef3d7"
+commit = "b2f0e1542aea337277e78d2efc654fc725fa04b8"
 
 [record]
 repository = "https://github.com/nifeos/record"
