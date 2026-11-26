@@ -190,17 +190,13 @@ jobs:
           path: nife
           persist-credentials: false
 
-      - name: Cache QEMU
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/nife-qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
       # helpers/apt-mirror-fallback.sh: apt retries, and a second Ubuntu mirror when the archive hosts
       # do not resolve; its header says why. Name: provisional.
       - name: Keep apt working when Ubuntu's archive does not resolve
         run: helpers/apt-mirror-fallback.sh
 
-      - name: Build QEMU if the cache missed
+      # Built from source on every run, as in the gate: no job here restores a cache.
+      - name: Build QEMU
         working-directory: nife
         run: script/ci-qemu
       - name: Put it on PATH
@@ -244,20 +240,9 @@ jobs:
   # Provisional name. Boots the image basalt composed from its own packages: nife milestone 909
   # item 4. Its two boots are required checks; their names are provisional.
   #
-  # CodeQL's `actions/cache-poisoning/poisonable-step` reports this job once — the `actions`
-  # language analysis, path here, the step that runs `cargo xtask base-image`. Dismissing it is
-  # calef's act. The pattern it matches is a checkout whose `ref` is `steps.pin.outputs.commit`
-  # ("commit" is what its heuristic reads as a pull request's head) followed by a command its model
-  # lists as running the checked-out code (`cargo`), in a workflow an external event
-  # (`workflow_dispatch`) can start. The path it names is a manual dispatch of the default branch,
-  # where the ref is the pin this repository records, read from the same commit by
-  # `helpers/pins.py`, and the job holds `contents: read`; a pull request's cache entries are scoped
-  # to its own branch, so no run of this job can poison the QEMU cache `main` restores. `install`
-  # above checks out the pin the same way and is not reported, because its steps call this
-  # repository's `script/*` entry points, which the model does not list. No `if:` guard can suppress
-  # it either: the query's control checks (actor, association, repository, label, environment) do
-  # not cover `workflow_dispatch`, and a dispatch of the default branch has no untrusted code to
-  # gate.
+  # CodeQL's `actions/cache-poisoning/poisonable-step` query looks for a cache restored after
+  # running checked-out code; no job in this repository restores a cache
+  # (helpers/tests/test_workflow_caches.py), so it has nothing here to poison.
   composed:
     name: boots the image it composed (${{ matrix.row }})
     needs: [build, reproduce]
@@ -289,17 +274,13 @@ jobs:
           ref: ${{ steps.pin.outputs.commit }}
           path: nife
           persist-credentials: false
-      - name: Cache QEMU
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/nife-qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
       # helpers/apt-mirror-fallback.sh: apt retries, and a second Ubuntu mirror when the archive hosts
       # do not resolve; its header says why. Name: provisional.
       - name: Keep apt working when Ubuntu's archive does not resolve
         run: helpers/apt-mirror-fallback.sh
 
-      - name: Build QEMU if the cache missed
+      # Built from source on every run, as in the gate: no job here restores a cache.
+      - name: Build QEMU
         working-directory: nife
         run: script/ci-qemu
       - name: Put it on PATH

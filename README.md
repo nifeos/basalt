@@ -47,9 +47,11 @@ does not know basalt exists.
   note grants no more than that of the published package main's recipe names
   (tools/manifest_note_compare, built from nife's own crates at the pin), the release is still
   listed and not yanked, and the diff is only those version and digest lines; a failed check
-  leaves the pull request open with the label `needs-maintainer`. The build, which runs the
-  release's code, holds no credential; a separate job checks what it uploaded with main's own
-  helpers and only then pushes and arms. Today it watches `ripgrep`;
+  leaves the pull request open with the label `needs-maintainer`. The run on main only plans; it
+  pushes an empty commit to `recipe-build/<name>`, and
+  [`recipe build`](.github/workflows/recipe-build.yml) builds the release there, off main, with no
+  credential, then checks what the build uploaded with main's own helpers and only then pushes and
+  arms. Today it watches `ripgrep`;
   `helpers/recipe_bump.py watched` says why each other recipe is not watched.
 - [`helpers/pins.py`](helpers/pins.py) is the one reader and writer of `pins.toml`.
 - [`recipes/`](recipes/) holds one recipe per package basalt builds. Each names its upstream
@@ -286,9 +288,11 @@ commit=e2ee497174609a23288898a355c933d639dda53c
   pass on a pull request, and the bump's pull request is merged by a person.
 - **GitHub suspends scheduled workflows after 60 days with no activity in the repository.** A bump
   pull request nobody merges is not activity.
-- **Until the gate has run on `main`, every pull request builds QEMU from source** (about 4.3
-  minutes of a 15-minute run). A cache saved by a pull request is visible only to that pull request,
-  and a red run saves none.
+- **Every run builds QEMU from source, and the gate builds nife's tree cold**, because no job
+  restores a cache: release builds that no person reviewed run here (record §328), and a cache
+  entry their code planted could make a required check pass falsely. QEMU costs about 4.5 minutes
+  per job that boots; the jobs run in parallel, so a run takes about that much longer.
+  helpers/tests/test_workflow_caches.py fails the gate if a job gains a cache.
 - **Only github.com repositories can be pinned**, because the gate checks out with
   `actions/checkout`.
 - **The kept "images" are the test images**, the kernels the system test boots and their program
