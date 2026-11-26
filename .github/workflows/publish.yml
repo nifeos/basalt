@@ -133,8 +133,9 @@ jobs:
 
       # A rerun of failed jobs reuses the same artifact, so the bytes are the same and the Release
       # that exists is accepted. Different bytes under an existing tag are refused: an asset is
-      # never replaced, since an index somewhere may already vouch for it. A source archive the
-      # Release lacks is added to it. What goes up is what `publish` wrote, never the artifact.
+      # never replaced, since an index somewhere may already vouch for it. A package or source
+      # archive the Release lacks is added to it, so a Release left half made by a failed upload is
+      # completed by a rerun. What goes up is what `publish` wrote, never the artifact.
       #
       # Each package goes up with its source archive (`<name>-<version>-source.tar.gz`, provisional),
       # what helpers/packages.py says it was built from: a GPL package's binary may only be offered
@@ -149,10 +150,13 @@ jobs:
           [ ${#sources[@]} -gt 0 ] || { echo "::error::the build wrote no source archives"; exit 1; }
           if gh release view "$TAG" >/dev/null 2>&1; then
             mkdir existing
-            gh release download "$TAG" --dir existing --pattern '*.nifepkg' --pattern '*-source.tar.gz'
+            # gh refuses a download that matches no asset, and a half-made Release may hold none.
+            if [ "$(gh release view "$TAG" --json assets --jq '[.assets[].name | select(endswith(".nifepkg") or endswith("-source.tar.gz"))] | length')" -gt 0 ]; then
+              gh release download "$TAG" --dir existing --pattern '*.nifepkg' --pattern '*-source.tar.gz'
+            fi
             for f in site/rolling/targets/*.nifepkg "${sources[@]}"; do
               e="existing/$(basename "$f")"
-              if [ ! -e "$e" ] && [[ "$f" == *-source.tar.gz ]]; then
+              if [ ! -e "$e" ]; then
                 gh release upload "$TAG" "$f"
                 continue
               fi

@@ -107,6 +107,14 @@ class ThePublishRun(unittest.TestCase):
         for needle in ["packages.py build", "packages.py base", "cargo", "script/", "nife_path", "repository: ${{"]:
             self.assertNotIn(needle, code)
 
+    def test_a_rerun_completes_a_half_made_release(self):
+        step = next(s for s in steps(job(PUBLISH, "publish")) if any("gh release download" in l for l in s))
+        text = "\n".join(step)
+        self.assertIn('if [ ! -e "$e" ]; then', text)
+        self.assertNotIn('[[ "$f" == *-source.tar.gz ]]', text)
+        self.assertLess(text.index('if [ ! -e "$e" ]'), text.index('gh release upload "$TAG" "$f"'))
+        self.assertIn('cmp -s "$f" "$e" || {', text)
+
     def test_backup_refuses_a_site_publish_did_not_write(self):
         block = job(PUBLISH, "backup")
         names = [step[0].strip() for step in steps(block)]
