@@ -34,7 +34,16 @@
 # the notes against the package main's recipe names (`served`) with a note tool built in a third
 # job that runs no upstream code (`note tool`), rechecks the release in crates.io's index, and only
 # then mints the App's token, commits, pushes and arms. The release is checked once more just
-# before arming, so one yanked after planning never arms.
+# before arming, so one yanked after planning never arms. The note tool is run only once its
+# SHA-256 is the one `note tool` reported, so an artifact `build` uploaded under its name is refused.
+#
+# **What `build` can still reach.** It restores and saves no cache, and no action in it caches.
+# A job cannot give up the runner's own cache token, though, and a hosted runner gives every step
+# sudo, so code in a release could read that token and save entries in main's cache scope, which
+# gate.yml and packages.yml restore (QEMU, and the Rust cache in the gate). This workflow cannot
+# close that; what limits it is that only watched releases build here, each past its hold, and the
+# `reproduce` job rebuilds every package on the pull request. Moving the build to a runner that
+# holds no cache token, or keeping caches out of the publishing job, would close it.
 #
 # **The outcome.** `decide` reads the results. All hold and the release is past the hold: the run
 # arms auto-merge under the same identity checks as pin-bump.yml, and the merge publishes. A check
@@ -97,6 +106,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # A dispatch from a branch would push and edit the pull request with that branch's helpers.
+      - name: Refuse a run that is neither on main nor a pull request's dry run
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::recipe bump runs from main only; this run is on $GITHUB_REF"
+            exit 1
+          fi
       - name: The decision logic's tests
         run: python3 -m unittest discover -s helpers/tests -v
       - name: List them, and say why each other recipe is not watched
@@ -128,6 +144,8 @@ jobs:
     if: needs.watched.outputs.recipes != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    outputs:
+      sha256: ${{ steps.tool.outputs.sha256 }}
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
@@ -141,12 +159,15 @@ jobs:
           path: nife
           persist-credentials: false
       - name: Build and test it against nife's crates at the pin
+        id: tool
         run: |
           set -e
           tool="$(helpers/recipe_bump.py note-tool nife | tail -1)"
           cargo test --release --manifest-path tools/manifest_note_compare/Cargo.toml \
             --target-dir tools/manifest_note_compare/target
           mkdir -p "$RUNNER_TEMP/tool" && cp "$tool" "$RUNNER_TEMP/tool/"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/tool/manifest_note_compare" | cut -d' ' -f1)" \
+            | tee -a "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: manifest-note-compare
@@ -154,7 +175,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  # Runs the release's code. Holds no credential, and nothing it uploads is believed unchecked.
+  # Runs the release's code. Holds no credential, restores and saves no cache, and nothing it
+  # uploads is believed unchecked.
   build:
     name: build ${{ matrix.recipe }}
     needs: watched
@@ -236,7 +258,10 @@ jobs:
   propose:
     name: propose ${{ matrix.recipe }}
     needs: [watched, note-tool, build]
-    if: needs.watched.outputs.recipes != '[]'
+    # One recipe's failed build fails its own leg (its artifact is missing), not every recipe's.
+    if: >-
+      !cancelled() && needs.watched.result == 'success' && needs.note-tool.result == 'success'
+      && needs.watched.outputs.recipes != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
@@ -251,6 +276,7 @@ jobs:
       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
       DRY_RUN: ${{ github.event_name == 'pull_request' }}
       RECIPE: ${{ matrix.recipe }}
+      NOTE_TOOL_SHA256: ${{ needs.note-tool.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -313,6 +339,11 @@ jobs:
             exit 0
           fi
           tool="$RUNNER_TEMP/tool/manifest_note_compare"
+          got="$(sha256sum "$tool" | cut -d' ' -f1)"
+          if [ -z "$NOTE_TOOL_SHA256" ] || [ "$got" != "$NOTE_TOOL_SHA256" ]; then
+            echo "::error::the note tool hashes to $got, not ${NOTE_TOOL_SHA256:-nothing}, which note tool built"
+            exit 1
+          fi
           chmod +x "$tool"
           worst=0
           : > "$RUNNER_TEMP/note.txt"
