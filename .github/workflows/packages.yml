@@ -371,6 +371,13 @@ jobs:
           [ "$(echo "$site" | jq -r .cname)" = "$DOMAIN" ] || { echo "::error::Pages' custom domain must be $DOMAIN"; exit 1; }
           [ "$(echo "$site" | jq -r .https_enforced)" = true ] || echo "::warning::HTTPS is not enforced on $DOMAIN yet"
 
+      # The artifact is believed for nothing main records. `build` ran the release's code with
+      # sudo, and a process it left behind could rewrite a package and its index line alike after
+      # the build's own check, the same way in both legs, so `reproduce` would pass too. This job
+      # runs no upstream code and checks out main itself, and `publish` takes only the packages
+      # main's recipes name, each hashing to the `[package_digest]` they record, writes the index
+      # from those recipes, and rebuilds each source archive from main; the Release step below
+      # uploads what it wrote, never the artifact. The base packages are not published.
       - name: Fetch the repository the build made and the install proved
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -408,12 +415,12 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           shopt -s nullglob
-          sources=(repository/rolling/sources/*-source.tar.gz)
+          sources=(site/rolling/sources/*-source.tar.gz)
           [ ${#sources[@]} -gt 0 ] || { echo "::error::the build wrote no source archives"; exit 1; }
           if gh release view "$TAG" >/dev/null 2>&1; then
             mkdir existing
             gh release download "$TAG" --dir existing --pattern '*.nifepkg' --pattern '*-source.tar.gz'
-            for f in repository/rolling/targets/*.nifepkg "${sources[@]}"; do
+            for f in site/rolling/targets/*.nifepkg "${sources[@]}"; do
               e="existing/$(basename "$f")"
               if [ ! -e "$e" ] && [[ "$f" == *-source.tar.gz ]]; then
                 gh release upload "$TAG" "$f"
@@ -434,7 +441,7 @@ jobs:
               echo
               echo "Each package's source, the exact files and patches it was built from, is the \`<name>-<version>-source.tar.gz\` beside it."
             } > notes.md
-            gh release create "$TAG" repository/rolling/targets/*.nifepkg "${sources[@]}" \
+            gh release create "$TAG" site/rolling/targets/*.nifepkg "${sources[@]}" \
               --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
           fi
 

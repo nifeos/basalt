@@ -39,6 +39,11 @@ location, the package's asset on the GitHub Release whose download URL prefix is
     <site-dir>/rolling/targets/<stem>.nifepkg     basalt's own copy, which nife's jig tries last
     <site-dir>/rolling/sources/<name>-<version>-source.tar.gz   the source of that copy
 
+`publish` believes the built repository for nothing this checkout's recipes record: it takes only
+the packages they name, each hashing to its `[package_digest]` line, writes the index from them, and
+rebuilds each source archive from this checkout, taking only the upstream files that hash to the
+recipe's digests. Run it from a checkout of main, in a job that runs no upstream code.
+
 The listed location names the root its certificate chains to, `sectigo-root-e46`, which is
 github.com's: calef's C2, ruled 2026-10-12 UTC on nife#2048 (nife section 250, clauses 11 to 13).
 jig fetches it under that root and follows its one redirect to an ISRG Root X1 host.
@@ -630,10 +635,19 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
     Members, under `<name>-<version>-source/`: `upstream/` (each fetched file, as fetched),
     `patches/` (each patch the recipe applies), `recipes/<name>.toml`, `helpers/packages.py`,
     `pins.toml` and `BUILT-FROM`."""
-    top = f"{recipe['name']}-{recipe['version']}-source"
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=nife, check=True, capture_output=True, text=True
     ).stdout.strip()
+    upstream = [(s.name, s.read_bytes()) for s in sources]
+    top, members = source_members(recipe, recipe_path, upstream, commit)
+    write_source_tarball(top, members, dest)
+
+
+def source_members(recipe, recipe_path, upstream, commit):
+    """`(top, [(member name, bytes)])` of a recipe's source archive: `upstream` is
+    `[(file name, bytes)]`, the files it fetched, and `commit` the nife commit it was built at.
+    Everything else is this checkout's own, so `publish` can rebuild the archive from main."""
+    top = f"{recipe['name']}-{recipe['version']}-source"
     pins = tomllib.loads((BASALT / "pins.toml").read_text())
     note = (
         f"{recipe['name']} {recipe['version']}, as basalt builds it.\n\n"
@@ -650,7 +664,7 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
             f"{recipe['program']} of its `{recipe['nife']['package']}` package), so upstream/ is "
             "empty.\n"
         )
-    members = [(f"upstream/{s.name}", s.read_bytes()) for s in sources]
+    members = [(f"upstream/{name}", data) for name, data in upstream]
     for patch in recipe.get("patch", []):
         members.append((patch["file"], (BASALT / patch["file"]).read_bytes()))
     members += [
@@ -659,7 +673,19 @@ def source_archive(recipe, recipe_path, sources, nife, dest):
         ("pins.toml", (BASALT / "pins.toml").read_bytes()),
         ("BUILT-FROM", note.encode()),
     ]
-    write_source_tarball(top, members, dest)
+    return top, members
+
+
+def upstream_files(recipe):
+    """`{file name: SHA-256}` of what the recipe fetches, as the build names the files."""
+    if "nife" in recipe:
+        return {}
+    if "object" in recipe:
+        return {source_name(source): source["sha256"] for source in recipe["source"]}
+    files = {f"{recipe['crate']}-{recipe['version']}.crate": recipe["sha256"]}
+    for patch in recipe.get("patch", []):
+        files[f"{patch['crate']}-{patch['version']}.crate"] = patch["sha256"]
+    return files
 
 
 def read_base_image(nife, recipe):
@@ -892,40 +918,119 @@ def listed_location(release, stem):
     return f"{RELEASE_ROOT}={url}"
 
 
+def published_recipes():
+    """`[(path, recipe)]` for every recipe `publish` serves: all but the base, whose packages no
+    published index carries."""
+    found = []
+    for path in sorted((BASALT / "recipes").glob("*.toml")):
+        recipe = tomllib.loads(path.read_text())
+        if "base" not in recipe:
+            found.append((path, recipe))
+    return found
+
+
+def expected_packages():
+    """`{stem: "sha256:<hex>"}`: every package this checkout's recipes record, one per recipe per
+    architecture, from each `[package_digest]` table."""
+    expected = {}
+    for path, recipe in published_recipes():
+        digests = recipe.get(DIGEST_TABLE)
+        if not isinstance(digests, dict):
+            fail(f"{path.relative_to(BASALT)} has no [{DIGEST_TABLE}] table; nothing vouches for its packages")
+        for arch in ARCHITECTURES:
+            digest = digests.get(arch)
+            if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+                fail(f"{path.relative_to(BASALT)}: [{DIGEST_TABLE}] records no digest for {arch}")
+            expected[f"{recipe['name']}-{recipe['version']}-{arch}"] = digest
+    return expected
+
+
+def only_files(directory, names):
+    """Refuse `directory` unless it holds exactly the files `names`, and nothing else."""
+    found = sorted(p.name for p in directory.iterdir()) if directory.is_dir() else []
+    if found != sorted(names):
+        extra = sorted(set(found) - set(names))
+        missing = sorted(set(names) - set(found))
+        fail(f"{directory} holds {len(extra)} file(s) no recipe names and lacks {len(missing)} it "
+             f"names: extra {extra[:5]}, missing {missing[:5]}")
+
+
+def rebuilt_source_archive(archive, path, recipe, commit):
+    """The recipe's source archive rebuilt from this checkout, taking only its upstream files from
+    `archive`, and each of those only once it hashes to the recipe's SHA-256."""
+    want = upstream_files(recipe)
+    top = f"{recipe['name']}-{recipe['version']}-source"
+    upstream = []
+    try:
+        with tarfile.open(archive, mode="r:gz") as t:
+            for name, digest in sorted(want.items()):
+                try:
+                    member = t.getmember(f"{top}/upstream/{name}")
+                except KeyError:
+                    fail(f"{archive.name} carries no upstream/{name}")
+                if not member.isfile():
+                    fail(f"{archive.name}: upstream/{name} is not a file")
+                data = t.extractfile(member).read()
+                if hashlib.sha256(data).hexdigest() != digest:
+                    fail(f"{archive.name}: upstream/{name} does not hash to {path.name}'s {digest}")
+                upstream.append((name, data))
+    except (tarfile.TarError, OSError, EOFError) as error:
+        fail(f"{archive.name} is not a readable source archive ({type(error).__name__})")
+    return source_members(recipe, path, upstream, commit)
+
+
 def publish(repository, site, release):
+    """Write the site from the built repository, believing it for nothing this checkout records.
+
+    The build ran a release's code with sudo, and a process it left behind could have rewritten a
+    package and the index line that vouches for it alike, after the build's own digest check. So
+    every package must be one this checkout's recipes name and hash to the `[package_digest]` they
+    record, and no other file is taken; the index is written from the recipes, not copied; and each
+    source archive is rebuilt from this checkout, its upstream files taken only once they hash to
+    the recipe's digests. Run it from a checkout of main, in a job that runs no upstream code."""
     index = repository / CHANNEL / "metadata" / "stand-in-index"
     targets = repository / CHANNEL / "targets"
+    sources = repository / CHANNEL / "sources"
     if not index.is_file():
         fail(f"{index} does not exist; run `build` first")
+    expected = expected_packages()
+    if not expected:
+        fail("no recipe names a package; nothing to publish")
+    built = {}
+    for line in index.read_text().splitlines():
+        words = line.split(" ")
+        if len(words) != 2 or not words[1].startswith("sha256:") or words[0] in built:
+            fail(f"{index}: a line is not `<stem> sha256:<hex>`, or repeats a stem; was it published already?")
+        built[words[0]] = words[1]
+    if built != expected:
+        missing = sorted(set(expected) - set(built))
+        wrong = sorted(stem for stem in expected if stem in built and built[stem] != expected[stem])
+        extra = len(set(built) - set(expected))
+        fail(f"{index} does not list exactly the packages and digests the recipes record: "
+             f"missing {missing}, other digests for {wrong}, {extra} stem(s) no recipe names")
+    only_files(targets, [f"{stem}.nifepkg" for stem in expected])
+    recipes = published_recipes()
+    only_files(sources, [f"{r['name']}-{r['version']}-source.tar.gz" for _, r in recipes])
     out_metadata = site / CHANNEL / "metadata"
     out_targets = site / CHANNEL / "targets"
     out_sources = site / CHANNEL / "sources"
     for d in (out_metadata, out_targets, out_sources):
         d.mkdir(parents=True, exist_ok=True)
     lines = []
-    for line in index.read_text().splitlines():
-        if not line:
-            continue
-        words = line.split(" ")
-        if len(words) != 2 or not words[1].startswith("sha256:"):
-            fail(f"{index}: {line!r} is not `<stem> sha256:<hex>`; was it published already?")
-        stem, digest = words
+    for stem, digest in expected.items():
         package = targets / f"{stem}.nifepkg"
-        if not package.is_file() or f"sha256:{sha256(package)}" != digest:
-            fail(f"{package} is missing or does not hash to the index's {digest}")
+        if package.is_symlink() or not package.is_file() or f"sha256:{sha256(package)}" != digest:
+            fail(f"{package.name} does not hash to the {digest} its recipe records")
         shutil.copyfile(package, out_targets / package.name)
         lines.append(f"{stem} {digest} {listed_location(release, stem)}\n")
-    if not lines:
-        fail(f"{index} lists no packages; nothing to publish")
     # Every package is published beside its source, here as on the Release.
-    for stem in (line.split(" ")[0] for line in lines):
-        name_version = stem.rsplit("-", 1)[0]
-        archive = repository / CHANNEL / "sources" / f"{name_version}-source.tar.gz"
-        if not archive.is_file():
-            fail(f"{stem} has no source archive ({archive}); refusing to publish it without one")
-        shutil.copyfile(archive, out_sources / archive.name)
+    commit = tomllib.loads((BASALT / "pins.toml").read_text())["nife"]["commit"]
+    for path, recipe in recipes:
+        name = f"{recipe['name']}-{recipe['version']}-source.tar.gz"
+        top, members = rebuilt_source_archive(sources / name, path, recipe, commit)
+        write_source_tarball(top, members, out_sources / name)
     (out_metadata / "stand-in-index").write_text("".join(lines))
-    print(f"packages: {len(lines)} packages published into {site}")
+    print(f"packages: {len(lines)} packages published into {site}, each the digest its recipe records")
     print("".join(lines), end="")
 
 
