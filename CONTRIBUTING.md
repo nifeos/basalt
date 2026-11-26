@@ -53,7 +53,7 @@ Seven checks are required before anything merges into `main`:
 Two more legs of the install job, `jig installs them (rg-threads-aarch64-riscv64)` and `jig
 installs them (rg-threads-x86_64)`, run nife's `rg-threads` rows on the same packages: `rg` walking
 in parallel at four cores, and the unmodified `ioping`, `hackbench` and `sqlite`. They are not
-required checks, but `publish` waits for them. CodeQL runs too, and is not required. The two composed checks compose and boot an image from
+required checks, but the `publish` workflow waits for them. CodeQL runs too, and is not required. The two composed checks compose and boot an image from
 basalt's own base packages (nife milestone 909 item 4), and their check names are provisional.
 
 ## Licenses

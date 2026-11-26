@@ -5,6 +5,7 @@ Usage:
     helpers/packages.py build <nife-checkout> <repository-dir> [--triples T ...]
     helpers/packages.py base <nife-checkout> <repository-dir> [--triples T ...] [--test]
     helpers/packages.py publish <repository-dir> <site-dir> --release <url>
+    helpers/packages.py site-digest <site-dir>
     helpers/packages.py check
 
 For each recipe under recipes/, this fetches the pinned source, refuses it unless its SHA-256 is
@@ -1034,6 +1035,21 @@ def publish(repository, site, release):
     print("".join(lines), end="")
 
 
+def site_digest(site):
+    """One SHA-256 over every file under `site`: each file's path relative to it and its own SHA-256,
+    one sorted line apiece. Refused when the tree holds anything but directories and regular files,
+    so the digest names every byte that would be served."""
+    lines = []
+    for path in sorted(site.rglob("*")):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            fail(f"{path} is neither a directory nor a regular file")
+        if path.is_file():
+            lines.append(f"{path.relative_to(site).as_posix()}\0{sha256(path)}\n")
+    if not lines:
+        fail(f"{site} holds no files")
+    return "sha256:" + hashlib.sha256("".join(lines).encode()).hexdigest()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -1054,12 +1070,16 @@ def main():
     p.add_argument("repository", type=pathlib.Path)
     p.add_argument("site", type=pathlib.Path)
     p.add_argument("--release", required=True, help="the Release's download URL prefix")
+    d = sub.add_parser("site-digest", help="one SHA-256 over every file of a site tree")
+    d.add_argument("site", type=pathlib.Path)
     sub.add_parser("check", help="refuse a recipe with no license or license files")
     args = parser.parse_args()
     if args.verb == "check":
         check()
     elif args.verb == "build":
         build(args.nife, args.repository.resolve(), args.triples, args.only, args.update_digests)
+    elif args.verb == "site-digest":
+        print(site_digest(args.site.resolve()))
     elif args.verb == "base":
         build_base(args.nife, args.repository.resolve(), args.triples, args.test)
     else:

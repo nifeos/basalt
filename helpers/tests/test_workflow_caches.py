@@ -110,7 +110,7 @@ class NoCacheAnywhere(unittest.TestCase):
             if privileged
         }
         for job in [
-            ("packages.yml", "publish"),
+            ("publish.yml", "publish"),
             ("recipe-build.yml", "propose"),
             ("pin-bump.yml", "propose"),
             ("codeql.yml", "analyze"),

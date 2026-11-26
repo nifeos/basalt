@@ -97,8 +97,11 @@ does not know basalt exists.
   package the kernel's boot self-test runs, and it lands in the `test` channel beside `rolling`,
   which `publish` never serves. Its two composed boots are required checks; the check names are
   provisional.
-- Its third job, `publish`, runs on `main` after both: the packages go on a GitHub Release and the
-  index on GitHub Pages at `basalt.nifeos.org`, as the next section says. Every package is
+- [`publish`](.github/workflows/publish.yml), a workflow of its own, runs once a `packages` run on
+  `main` has passed every job: the packages go on a GitHub Release and the index on GitHub Pages
+  at `basalt.nifeos.org`, as the next section says. It is a separate run because `build` runs a
+  release's code, which could reach that run's artifacts; it publishes only packages that hash to
+  the digests main's recipes record. Every package is
   published with its source archive beside it, on the Release and on Pages. ioping and hackbench
   are GPL, so their binaries may only be offered that way; every package gets the same
   treatment so no recipe has to remember.
@@ -128,7 +131,7 @@ own site from `nifeos/nifeos.github.io`.
 |---|---|---|
 | The index, `rolling/metadata/stand-in-index` | GitHub Pages, the project site of this repository, at its own custom domain `https://basalt.nifeos.org/` | Every nife image names this host and pins its TLS to ISRG Root X1 (nife §250); Pages certificates are Let's Encrypt and chain to X1 |
 | The packages, `<stem>.nifepkg` | One GitHub Release per publish, tagged `rolling-<UTC date of the commit>-<short commit>` (provisional) | Each asset's `download_count` is the first adoption signal, per package, version and architecture (nife milestone 576). Nothing identifies a system |
-| The index's second address, `https://basalt.crickertech.com/` | A second Pages site, of `nifeos/basalt-backup`'s `pages` branch, which `publish`'s `backup` job replaces with the same files each time | nife §250 clause 6: a second registrable domain, tried when the first stops answering (calef, 2026-10-21 UTC: *"P1: a second Pages site in nifeos for basalt.crickertech.com"*). Pages serves one custom domain per site. It still shares Pages, the organization, this workflow and NS1 with the first |
+| The index's second address, `https://basalt.crickertech.com/` | A second Pages site, of `nifeos/basalt-backup`'s `pages` branch, which the `publish` workflow's `backup` job replaces with the same files each time | nife §250 clause 6: a second registrable domain, tried when the first stops answering (calef, 2026-10-21 UTC: *"P1: a second Pages site in nifeos for basalt.crickertech.com"*). Pages serves one custom domain per site. It still shares Pages, the organization, this workflow and NS1 with the first |
 | The front page, `index.html`, written by `helpers/index_page.py` from [`web/index.html`](web/index.html) | The same Pages site, and `backup` copies it | A plain page, worded for the primary and for the backup, that says what the site is and links the files under `rolling/` as `publish` wrote them, so a link never goes stale. A later section about the distribution is added to the template |
 | basalt's own copy of the packages, `rolling/targets/` | The same Pages site | nife §250's amendment of 2026-10-10, clause 9: basalt always keeps a copy under its own `targets/`, tried last. The fallback when the Release cannot be reached, which is not counted |
 

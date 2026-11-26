@@ -166,5 +166,38 @@ class Publishing(unittest.TestCase):
         self.assertEqual(served, honest)
 
 
+class TheSiteDigest(unittest.TestCase):
+    """`site_digest`: what `publish` deploys and what `backup` copies are the same tree."""
+
+    def setUp(self):
+        self.site = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.site)
+        (self.site / "rolling" / "metadata").mkdir(parents=True)
+        (self.site / "rolling" / "metadata" / "stand-in-index").write_text("a sha256:00\n")
+        (self.site / "index.html").write_text("<p>basalt</p>\n")
+        self.digest = packages.site_digest(self.site)
+
+    def test_the_same_tree_has_the_same_digest(self):
+        self.assertRegex(self.digest, r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(packages.site_digest(self.site), self.digest)
+
+    def test_a_changed_file_moves_it(self):
+        (self.site / "index.html").write_text("<p>elsewhere</p>\n")
+        self.assertNotEqual(packages.site_digest(self.site), self.digest)
+
+    def test_an_added_file_moves_it(self):
+        (self.site / "rolling" / "extra").write_bytes(b"")
+        self.assertNotEqual(packages.site_digest(self.site), self.digest)
+
+    def test_a_renamed_file_moves_it(self):
+        (self.site / "index.html").rename(self.site / "other.html")
+        self.assertNotEqual(packages.site_digest(self.site), self.digest)
+
+    def test_a_symbolic_link_is_refused(self):
+        (self.site / "link").symlink_to("/etc/hostname")
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            packages.site_digest(self.site)
+
+
 if __name__ == "__main__":
     unittest.main()
