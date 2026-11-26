@@ -8,8 +8,8 @@
 # whatever the pinned commit says it does.
 #
 # **One job, not a matrix per architecture.** `script/ci-build test` runs all three legs in one
-# process, and a per-architecture matrix would triple the provisioning (toolchain, QEMU, the Rust
-# cache) and the host-crate pass to buy a separate status per architecture. The price is recorded
+# process, and a per-architecture matrix would triple the provisioning (toolchain, QEMU, the
+# build of the whole tree) and the host-crate pass to buy a separate status per architecture. The price is recorded
 # in the README's BUGS: a failing leg can hide the legs after it.
 #
 # Runner: the arm64 pool, the same machine nife's CI runs this check on, so a red here and a green
@@ -17,7 +17,7 @@
 # branches keep the cost at one runner per pin.
 #
 # A second job, `lint`, checks basalt's own files in seconds: every recipe names its license
-# (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), and typos on the tree
+# (`helpers/packages.py check`), ruff on helpers/*.py (ruff.toml), the helpers' tests, and typos on the tree
 # (_typos.toml). It is one of the required checks.
 #
 # Names provisional: the file, the workflow and the jobs.
@@ -41,12 +41,14 @@ jobs:
   nife:
     name: nife at its pin (image build and system test, three architectures)
     runs-on: ubuntu-24.04-arm
-    # nife's own budget for this check is 25 minutes with a warm cache. A cold run here also builds
-    # QEMU from source and the whole tree with no Rust cache, so the ceiling is wider; it is a
-    # runaway guard, not an estimate.
+    # nife's own budget for this check is 25 minutes with a warm cache. Every run here builds QEMU
+    # from source and the whole tree with no Rust cache, so the ceiling is wider; it is a runaway
+    # guard, not an estimate.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Read the pin
         id: pin
         run: |
@@ -73,24 +75,16 @@ jobs:
           echo "## nife at \`$PIN\`" >> "$GITHUB_STEP_SUMMARY"
           git log -1 --format='%cd (UTC) %s' --date=format-local:'%Y-%m-%d %H:%M' >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: nife -> target
-
-      # The same QEMU nife pins in .qemu-version, built by the pinned commit's own script and cached
-      # under the same key shape nife uses. Caches do not cross repositories, so basalt's first run
-      # builds it once.
-      - name: Cache QEMU
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/nife-qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nife/.qemu-version') }}
+      # No cache, here or in any job: release builds no person reviewed run in this repository's
+      # workflows, and a cache entry they planted would reach this check. helpers/tests/
+      # test_workflow_caches.py says why and fails if a job gains one.
       # helpers/apt-mirror-fallback.sh: apt retries, and a second Ubuntu mirror when the archive hosts
       # do not resolve; its header says why. Name: provisional.
       - name: Keep apt working when Ubuntu's archive does not resolve
         run: helpers/apt-mirror-fallback.sh
 
-      - name: Build QEMU if the cache missed
+      # The same QEMU nife pins in .qemu-version, built by the pinned commit's own script.
+      - name: Build QEMU
         working-directory: nife
         run: script/ci-qemu
       - name: Put it on PATH
@@ -117,7 +111,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/images"
           for arch in aarch64-unknown-none-softfloat riscv64imac-unknown-none-elf x86_64-unknown-none; do
             [ -d "target/$arch/debug" ] || continue
-            # Newest first: a restored Rust cache can hold an older build's binary beside this one.
+            # Newest first, in case the build leaves an older binary beside this one.
             newest="$(find "target/$arch/debug" -type f -name 'system_tests-*' ! -name '*.d' \
                 \( -path '*/deps/*' -o -path '*/out/*' \) -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
             [ -z "$newest" ] || cp "$newest" "$RUNNER_TEMP/images/system_tests-$arch"
@@ -145,5 +139,7 @@ jobs:
         run: python3 helpers/packages.py check
       - name: ruff
         run: pipx run ruff==0.16.9 check helpers/
+      - name: The helpers' tests (helpers/tests)
+        run: python3 -m unittest discover -s helpers/tests
       - name: typos
         uses: crate-ci/typos@276087d9a4f06398b3e04825487805e2d7375888 # v1.52.2

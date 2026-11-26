@@ -12,3 +12,9 @@ __pycache__/
 
 # ruff's cache, from `ruff check` run by hand.
 .ruff_cache/
+
+# nife, checked out beside the tree by the recipe-bump workflow (or linked there by hand), and what
+# building tools/manifest_note_compare against it leaves.
+/nife
+/tools/manifest_note_compare/target/
+/tools/manifest_note_compare/Cargo.lock

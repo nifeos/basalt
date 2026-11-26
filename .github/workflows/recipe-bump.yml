@@ -1,0 +1,151 @@
+# recipe bump: each day, choose for each watched recipe the upstream release to propose, and ask
+# recipe-build.yml to build and propose it (record §328, ruled option A on 2026-11-25 UTC).
+#
+# **This run never runs a release's code.** It reads crates.io's index over plain HTTP and
+# nothing else of the release. A run on main saves cache entries every branch can restore, so the
+# release builds in recipe-build.yml, in a run on `recipe-build/<name>`; that header says why and
+# how the build is checked. To ask for it, this run pushes, with the automation App's token, an
+# empty commit on main's own commit to `recipe-build/<name>` whose subject is
+# `recipe build: <name> <version>`. A push with `github.token` starts no workflow, so without the
+# App's secrets the run fails here.
+#
+# **One pull request per recipe**, on the branch `recipe/<name>`. helpers/recipe_bump.py says which
+# recipes are watched and why the others are not (`watched`), and which release is proposed: the
+# newest that is past its source's hold (7 days for crates.io, provisional), so a release still in
+# the hold does not replace a pull request that could merge. Its header has the reasoning.
+#
+# The machinery is pin-bump.yml's (the App's token, a force-pushed branch per recipe, the arm
+# step's identity checks), split so that the build runs off main. To hold a recipe,
+# `gh pr merge recipe/<name> --disable-auto`, which lasts until the next scheduled run (daily at
+# 07:23 UTC); to hold longer, list it in helpers/recipe_bump.py's NOT_WATCHED with its reason.
+#
+# On a pull request that touches this file or the helpers, it plans as a dry run and pushes
+# nothing; recipe-build.yml's own dry run builds.
+#
+# Names provisional: the file, the workflow, the jobs, the branches `recipe/<name>` and
+# `recipe-build/<name>`, and the label.
+name: recipe bump
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: "one watched recipe (by file stem) instead of every watched one"
+        required: false
+        default: ""
+      version:
+        description: "a release to propose instead of the newest past the hold (needs `recipe`)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - .github/workflows/recipe-bump.yml
+      - helpers/recipe_bump.py
+      - helpers/tests/**
+      - tools/manifest_note_compare/**
+
+concurrency:
+  group: recipe-bump-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watched:
+    name: list the watched recipes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # A dispatch from a branch would push and edit the pull request with that branch's helpers.
+      - name: Refuse a run that is neither on main nor a pull request's dry run
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::recipe bump runs from main only; this run is on $GITHUB_REF"
+            exit 1
+          fi
+      - name: The decision logic's tests
+        run: python3 -m unittest discover -s helpers/tests -v
+      - name: List them, and say why each other recipe is not watched
+        id: list
+        env:
+          INPUT_RECIPE: ${{ inputs.recipe }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -e
+          all="$(helpers/recipe_bump.py watched)"
+          if [ -n "$INPUT_RECIPE" ]; then
+            echo "$all" | python3 -c 'import json, sys; sys.exit(sys.argv[1] not in json.load(sys.stdin))' \
+              "$INPUT_RECIPE" || { echo "::error::$INPUT_RECIPE is not a watched recipe"; exit 1; }
+            all="[\"$INPUT_RECIPE\"]"
+          elif [ -n "$INPUT_VERSION" ]; then
+            echo "::error::a version needs a recipe"; exit 1
+          fi
+          echo "recipes=$all" >> "$GITHUB_OUTPUT"
+
+  plan:
+    name: plan ${{ matrix.recipe }}
+    needs: watched
+    if: needs.watched.outputs.recipes != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.watched.outputs.recipes) }}
+    env:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      DRY_RUN: ${{ github.event_name == 'pull_request' }}
+      RECIPE: ${{ matrix.recipe }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Work out what to propose
+        id: plan
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: helpers/recipe_bump.py plan "$RECIPE" ${INPUT_VERSION:+--version "$INPUT_VERSION"} | tee -a "$GITHUB_OUTPUT"
+
+      - name: The App's secrets are needed to start the build
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true' && env.AUTOMATION_APP_ID == ''
+        run: |
+          echo "::error::AUTOMATION_APP_ID is not set, and a github.token push starts no build"
+          exit 1
+
+      - name: Mint an installation token for the automation App
+        id: app-token
+        if: steps.plan.outputs.skip == 'false' && env.DRY_RUN != 'true'
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+
+      - name: Ask recipe build to build it
+        if: steps.plan.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q --allow-empty -m "recipe build: $RECIPE $VERSION"
+          git log -1 --format='%H %s'
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run: would push this to recipe-build/$RECIPE."
+            exit 0
+          fi
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push --force origin "HEAD:refs/heads/recipe-build/$RECIPE"
+          echo "Pushed recipe-build/$RECIPE; recipe build takes it from here." >> "$GITHUB_STEP_SUMMARY"
